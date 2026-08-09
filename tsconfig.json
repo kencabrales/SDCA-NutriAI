@@ -29,6 +29,6 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
     "**/*.mts"
-  ],
+, "lib/mongodb.js", "app/manifest.js", "app/page.js"  ],
   "exclude": ["node_modules"]
 }
