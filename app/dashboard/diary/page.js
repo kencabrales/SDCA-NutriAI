@@ -1,42 +1,60 @@
+// app/dashboard/diary/page.js
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Plus, Apple, Sun, Moon, Cookie, Droplet, Search, Edit2, Trash2, BarChart3, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { ArrowLeft, Apple, Sun, Moon, Cookie, Droplet, Edit2, Trash2, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 
-// Relative path modular popup elements
 import CreateFoodModal from '../../components/diary/CreateFoodModal';
-import SearchFoodModal from '../../components/diary/SearchFoodModal';
+import SearchFoodModal from '../../components/diary/LogFoodModal';
 import FoodDetailModal from '../../components/diary/FoodDetailModal';
-import CreateRecipeModal from '../../components/diary/CreateRecipeModal'; // Added Import cleanly here
+import CreateRecipeModal from '../../components/diary/CreateRecipeModal';
+import CreateMealModal from '../../components/diary/CreateMealModal';
+import Toast from '../../components/Toast';
+import { ConfirmProvider, useConfirm } from '../../components/ConfirmContext';
 
-export default function FoodDiary() {
+function FoodDiaryContent() {
   const [user, setUser] = useState(null);
   const [logs, setLogs] = useState([]);
   const [waterAmount, setWaterAmount] = useState(0);
   const [customWater, setCustomWater] = useState('');
   const [loading, setLoading] = useState(false);
   const [currentDate, setCurrentDate] = useState('');
-  const [isHydrated, setIsHydrated] = useState(false); // Eliminates page flash & boot lag
+  const [isHydrated, setIsHydrated] = useState(false);
+  
+  // Modals and Food Editing State
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [isRecipeCreateOpen, setIsRecipeCreateOpen] = useState(false); // Added State Hook for Recipe Modal
+  const [editingFoodItem, setEditingFoodItem] = useState(null);
+  const [isRecipeCreateOpen, setIsRecipeCreateOpen] = useState(false);
+  const [isMealCreateOpen, setIsMealCreateOpen] = useState(false);
   const [targetFoodMacros, setTargetFoodMacros] = useState(null);
 
-  // Modals UI Layout Chaining State Hooks
+  const confirm = useConfirm();
+
+  // Global Toast State
+  const [toast, setToast] = useState({
+    show: false,
+    title: '',
+    message: '',
+    type: 'error'
+  });
+
+  const showToastNotification = useCallback((title, message, type = 'error') => {
+    setToast({ show: true, title, message, type });
+    setTimeout(() => setToast((prev) => ({ ...prev, show: false })), 3000);
+  }, []);
+
   const [activeMealType, setActiveMealType] = useState('breakfast');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedFoodName, setSelectedFoodName] = useState('');
-  
-  // Holds the document log record if the user clicks Edit
   const [editingLogItem, setEditingLogItem] = useState(null);
 
   const router = useRouter();
   const mealCategories = ['breakfast', 'lunch', 'dinner', 'snacks'];
 
-  // Wrap query tracking to run flawlessly inside both useEffect sequences
   const fetchDailyLogs = useCallback(async (userId, dateStr) => {
-    if (!dateStr) return;
+    if (!dateStr || !userId) return;
     try {
       const res = await fetch(`/api/food-log?userId=${userId}&date=${dateStr}`);
       if (res.ok) {
@@ -48,7 +66,6 @@ export default function FoodDiary() {
     }
   }, []);
 
-  // Phase 1: Authentication and baseline mounting lookups
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
     setCurrentDate(today);
@@ -59,7 +76,7 @@ export default function FoodDiary() {
     } else {
       const parsedUser = JSON.parse(session);
       setUser(parsedUser);
-      fetchDailyLogs(parsedUser.id, today);
+      fetchDailyLogs(parsedUser.id || parsedUser._id, today);
       
       const savedWater = localStorage.getItem(`water_${today}`);
       if (savedWater) setWaterAmount(parseInt(savedWater, 10));
@@ -67,11 +84,10 @@ export default function FoodDiary() {
     }
   }, [router, fetchDailyLogs]);
 
-  // Phase 2: Dynamic timeline triggers when shifting back and forth through dates
   const handleDateChange = (newDateStr) => {
     setCurrentDate(newDateStr);
     if (user) {
-      fetchDailyLogs(user.id, newDateStr);
+      fetchDailyLogs(user.id || user._id, newDateStr);
       const savedWater = localStorage.getItem(`water_${newDateStr}`);
       setWaterAmount(savedWater ? parseInt(savedWater, 10) : 0);
     }
@@ -106,42 +122,132 @@ export default function FoodDiary() {
   };
 
   const handleConfirmAddFood = async (foodPayload) => {
-    if (!currentDate) return;
+    if (!currentDate || !user) return;
     setLoading(true);
     try {
       const res = await fetch('/api/food-log', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, date: currentDate, ...foodPayload })
+        body: JSON.stringify({ userId: user.id || user._id, date: currentDate, ...foodPayload })
       });
-      if (res.ok) fetchDailyLogs(user.id, currentDate);
+
+      if (res.ok) {
+        fetchDailyLogs(user.id || user._id, currentDate);
+        const userRes = await fetch(`/api/user/profile?userId=${user.id || user._id}`);
+        if (userRes.ok) {
+          const updatedUserData = await userRes.json();
+          const newUserObj = { ...user, ...updatedUserData };
+          setUser(newUserObj);
+          localStorage.setItem('user', JSON.stringify(newUserObj));
+        }
+
+        showToastNotification('Food Logged!', `Added to ${foodPayload.mealType || activeMealType}.`, 'success');
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        showToastNotification('Error Logging Food', errorData.message || 'Failed to log food entry.', 'error');
+      }
     } catch (err) {
       console.error(err);
+      showToastNotification('Network Error', 'Could not connect to the server.', 'error');
     } finally {
       setLoading(false);
     }
   };
 
   const handleUpdateFoodLog = async (logId, updatedPayload) => {
+    if (!user) return;
     try {
       const res = await fetch(`/api/food-log/${logId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedPayload)
       });
-      if (res.ok) fetchDailyLogs(user.id, currentDate);
+      if (res.ok) {
+        fetchDailyLogs(user.id || user._id, currentDate);
+        showToastNotification('Log Updated', 'Your entry was updated successfully.', 'success');
+      } else {
+        showToastNotification('Error Updating', 'Failed to update entry.', 'error');
+      }
     } catch (err) {
       console.error(err);
+      showToastNotification('Error', 'Network error while updating.', 'error');
     }
   };
 
   const handleDeleteFoodLog = async (logId) => {
+    if (!user) return;
+
+    const isConfirmed = await confirm({
+      title: 'Delete Entry?',
+      message: 'Are you sure you want to remove this item from your diary?',
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      type: 'danger'
+    });
+
+    if (!isConfirmed) return;
+
     try {
       const res = await fetch(`/api/food-log/${logId}`, { method: 'DELETE' });
-      if (res.ok) fetchDailyLogs(user.id, currentDate);
+      if (res.ok) {
+        fetchDailyLogs(user.id || user._id, currentDate);
+        
+        const userRes = await fetch(`/api/user/profile?userId=${user.id || user._id}`);
+        if (userRes.ok) {
+          const updatedUserData = await userRes.json();
+          const newUserObj = { ...user, ...updatedUserData };
+          setUser(newUserObj);
+          localStorage.setItem('user', JSON.stringify(newUserObj));
+        }
+
+        showToastNotification('Entry Deleted', 'Item removed and streak updated.', 'success');
+      } else {
+        showToastNotification('Error', 'Failed to remove entry.', 'error');
+      }
     } catch (err) {
       console.error(err);
+      showToastNotification('Error', 'Network error while deleting entry.', 'error');
     }
+  };
+
+  const handleDeleteCustomFood = async (foodId, foodName) => {
+    const isConfirmed = await confirm({
+      title: 'Delete Custom Food?',
+      message: `Are you sure you want to permanently delete "${foodName}"?`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      type: 'danger'
+    });
+
+    if (!isConfirmed) return;
+
+    try {
+      const res = await fetch(`/api/custom-food?id=${foodId}&userId=${user.id || user._id}`, {
+      method: 'DELETE'
+      });
+
+      if (res.ok) {
+        showToastNotification('Food Deleted', `Removed "${foodName}" from your foods.`, 'success');
+        // Re-trigger search modal state to update the custom foods list dynamically
+        setIsSearchOpen(false);
+        setTimeout(() => setIsSearchOpen(true), 50);
+      } else {
+        showToastNotification('Error', 'Failed to delete custom food.', 'error');
+      }
+    } catch (err) {
+      console.error(err);
+      showToastNotification('Error', 'Network error while deleting custom food.', 'error');
+    }
+  };
+
+  const handleConfirmDeleteMeal = async (mealName) => {
+    return await confirm({
+      title: 'Delete Meal?',
+      message: `Are you sure you want to delete "${mealName}"?`,
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      type: 'danger'
+    });
   };
 
   const quickLogWater = (amountInMl) => {
@@ -149,6 +255,7 @@ export default function FoodDiary() {
     const total = waterAmount + amountInMl;
     setWaterAmount(total);
     localStorage.setItem(`water_${currentDate}`, total);
+    showToastNotification('Hydration Tracked', `+${amountInMl} ml water added.`, 'success');
   };
 
   const handleCustomWaterSubmit = (e) => {
@@ -157,77 +264,75 @@ export default function FoodDiary() {
     if (!isNaN(amount) && amount > 0) {
       quickLogWater(amount);
       setCustomWater('');
+    } else {
+      showToastNotification('Invalid Amount', 'Please enter a valid amount of water.', 'error');
     }
   };
 
-  // Nutrition Totals Math Engine
-  const totalCalories = logs.reduce((sum, item) => sum + item.calories, 0);
-  const totalProtein = logs.reduce((sum, item) => sum + item.protein, 0);
-  const totalCarbs = logs.reduce((sum, item) => sum + item.carbs, 0);
-  const totalFat = logs.reduce((sum, item) => sum + item.fat, 0);
+  const totalCalories = logs.reduce((sum, item) => sum + (item.calories || 0), 0);
+  const totalProtein = logs.reduce((sum, item) => sum + (item.protein || 0), 0);
+  const totalCarbs = logs.reduce((sum, item) => sum + (item.carbs || 0), 0);
+  const totalFat = logs.reduce((sum, item) => sum + (item.fat || 0), 0);
 
-  const goalCalories = user?.targetCalories || 2339;
-  const remainingCalories = goalCalories - totalCalories;
+  const goalCalories = Number(user?.targetCalories || 2000);
 
-  const targets = { c: 234, p: 175, f: 78 };
+  const targets = {
+    c: Number(user?.targetCarbs || user?.carbsGrams || Math.round(((goalCalories * ((user?.carbsPct || 40) / 100)) / 4)) || 250),
+    p: Number(user?.targetProtein || user?.proteinGrams || Math.round(((goalCalories * ((user?.proteinPct || 30) / 100)) / 4)) || 150),
+    f: Number(user?.targetFat || user?.fatGrams || Math.round(((goalCalories * ((user?.fatPct || 30) / 100)) / 9)) || 44)
+  };
+
+  const remainingCarbs = targets.c - Math.round(totalCarbs);
+  const remainingFat = targets.f - Math.round(totalFat);
+  const remainingProtein = targets.p - Math.round(totalProtein);
+
+  const carbCalories = totalCarbs * 4;
+  const fatCalories = totalFat * 9;
+  const proteinCalories = totalProtein * 4;
+
+  const totalMacroCalories = carbCalories + fatCalories + proteinCalories || 1; 
+
+  const circleRadius = 46;
+  const circleCircumference = 2 * Math.PI * circleRadius;
+  
+  const overallProgressFactor = Math.min(totalCalories / goalCalories, 1);
+  const totalFilledDash = overallProgressFactor * circleCircumference;
+
+  const carbDash = (carbCalories / totalMacroCalories) * totalFilledDash;
+  const fatDash = (fatCalories / totalMacroCalories) * totalFilledDash;
+  const proteinDash = (proteinCalories / totalMacroCalories) * totalFilledDash;
 
   const getMealIcon = (type) => {
     switch(type) {
-      case 'breakfast': return <Apple className="w-3.5 h-3.5 text-emerald-400" />;
-      case 'lunch': return <Sun className="w-3.5 h-3.5 text-amber-400" />;
-      case 'dinner': return <Moon className="w-3.5 h-3.5 text-indigo-400" />;
-      default: return <Cookie className="w-3.5 h-3.5 text-orange-400" />;
+      case 'breakfast': return <Apple className="w-4 h-4 text-[#00A86B]" />;
+      case 'lunch': return <Sun className="w-4 h-4 text-amber-400" />;
+      case 'dinner': return <Moon className="w-4 h-4 text-indigo-400" />;
+      default: return <Cookie className="w-4 h-4 text-orange-400" />;
     }
   };
 
-  const MacroCircle = ({ current, target, colorClass, label }) => {
-    const percentage = Math.min((current / target) * 100, 100) || 0;
-    const radius = 24;
-    const circumference = 2 * Math.PI * radius;
-    const strokeDashoffset = circumference - (percentage / 100) * circumference;
-
-    return (
-      <div className="flex flex-col items-center bg-[#161F30]/40 border border-gray-800/50 rounded-xl p-3 flex-1">
-        <div className="relative w-14 h-14 flex items-center justify-center">
-          <svg className="w-full h-full transform -rotate-90">
-            <circle cx="28" cy="28" r={radius} stroke="#1C2638" strokeWidth="3.5" fill="transparent" />
-            <circle 
-              cx="28" cy="28" r={radius} strokeWidth="3.5" fill="transparent"
-              strokeDasharray={circumference} strokeDashoffset={strokeDashoffset}
-              className={`${colorClass} transition-all duration-500 ease-out`}
-              strokeLinecap="round"
-            />
-          </svg>
-          <div className="absolute text-[10px] font-mono font-bold text-white">{Math.round(percentage)}%</div>
-        </div>
-        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1.5">{label}</p>
-        <p className="text-xs font-mono font-bold text-white mt-0.5">{Math.round(current)}g<span className="text-gray-500 font-normal text-[10px]">/{target}g</span></p>
-      </div>
-    );
-  };
-
   if (!isHydrated || !currentDate) {
-    return <div className="min-h-screen bg-[#0B121F] text-white p-8 font-mono text-xs animate-pulse">Synchronizing Diary Session Matrix...</div>;
+    return <div className="min-h-screen bg-[#0B121F] text-white p-8 font-mono text-xs animate-pulse">Loading Food Diary...</div>;
   }
 
   return (
     <main className="min-h-screen bg-[#0B121F] text-white p-4 md:p-6 font-sans">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-3xl mx-auto space-y-5">
         
-        {/* Compact Navigation Bar */}
-        <button onClick={() => router.push('/dashboard')} className="flex items-center space-x-2 text-gray-400 hover:text-white mb-4 text-xs font-bold uppercase tracking-wider transition-colors">
+        {/* Navigation Bar */}
+        <button onClick={() => router.push('/dashboard')} className="flex items-center space-x-2 text-gray-400 hover:text-white text-xs font-bold uppercase tracking-wider transition-colors">
           <ArrowLeft className="w-3.5 h-3.5" />
           <span>Dashboard</span>
         </button>
 
-        {/* --- DYNAMIC DATE NAVIGATOR ROW --- */}
-        <div className="flex items-center justify-between bg-[#121A2A] border border-gray-800/80 rounded-2xl p-4 mb-4">
+        {/* Date Navigator */}
+        <div className="flex items-center justify-between bg-[#121A2A] border border-gray-800/80 rounded-2xl p-4">
           <div className="flex items-center space-x-3">
             <div className="p-2 bg-[#161F30] border border-gray-800 rounded-xl">
               <Calendar className="w-4 h-4 text-[#00A86B]" />
             </div>
             <div>
-              <h4 className="text-[9px] font-mono font-bold text-gray-500 uppercase tracking-widest">Selected Log Period</h4>
+              <h4 className="text-[9px] font-mono font-bold text-gray-500 uppercase tracking-widest">Log Period</h4>
               <p className="text-xs font-black text-white mt-0.5">{getDisplayDateText(currentDate)}</p>
             </div>
           </div>
@@ -254,188 +359,100 @@ export default function FoodDiary() {
           </div>
         </div>
 
-        {/* --- DASHBOARD HEADER MATRIX --- */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          
-          {/* Calories Remaining Card */}
-          <div className="bg-[#121A2A] border border-gray-800/80 rounded-2xl p-4 flex flex-col justify-center items-center md:col-span-1">
-            <p className="text-3xl font-black tracking-tight text-white">{remainingCalories.toLocaleString()}</p>
-            <p className="text-[10px] text-[#00A86B] font-mono uppercase tracking-widest mt-0.5 font-bold">Remaining Kcal</p>
-            
-            <div className="flex items-center justify-between w-full border-t border-gray-800/80 mt-3 pt-2 text-[11px] text-gray-400 font-mono">
-              <div>Goal: <span className="text-white font-bold">{goalCalories}</span></div>
-              <div className="text-gray-700">•</div>
-              <div>Food: <span className="text-amber-500 font-bold">{totalCalories}</span></div>
+        {/* MINIMALIST CALORIE & MACRO DASHBOARD */}
+        <div className="bg-[#121A2A] border border-gray-800/80 rounded-2xl p-6">
+          <div className="flex items-center justify-between">
+            <div className="relative w-28 h-28 flex items-center justify-center">
+              <svg className="w-full h-full transform -rotate-90">
+                <circle cx="56" cy="56" r={circleRadius} stroke="#161F30" strokeWidth="8" fill="transparent" />
+                
+                {carbDash > 0 && (
+                  <circle 
+                    cx="56" cy="56" r={circleRadius} strokeWidth="8" fill="transparent"
+                    stroke="#22d3ee"
+                    strokeDasharray={`${carbDash} ${circleCircumference - carbDash}`}
+                    strokeDashoffset="0"
+                    strokeLinecap="round"
+                    className="transition-all duration-500 ease-out"
+                  />
+                )}
+
+                {fatDash > 0 && (
+                  <circle 
+                    cx="56" cy="56" r={circleRadius} strokeWidth="8" fill="transparent"
+                    stroke="#c084fc"
+                    strokeDasharray={`${fatDash} ${circleCircumference - fatDash}`}
+                    strokeDashoffset={-carbDash}
+                    strokeLinecap="round"
+                    className="transition-all duration-500 ease-out"
+                  />
+                )}
+
+                {proteinDash > 0 && (
+                  <circle 
+                    cx="56" cy="56" r={circleRadius} strokeWidth="8" fill="transparent"
+                    stroke="#fbbf24"
+                    strokeDasharray={`${proteinDash} ${circleCircumference - proteinDash}`}
+                    strokeDashoffset={-(carbDash + fatDash)}
+                    strokeLinecap="round"
+                    className="transition-all duration-500 ease-out"
+                  />
+                )}
+              </svg>
+              <div className="absolute flex flex-col items-center justify-center text-center">
+                <span className="text-xl font-black text-white">{totalCalories}</span>
+                <span className="text-[10px] font-medium text-green-400">/ {goalCalories} cal</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-6 text-center">
+              <div>
+                <p className="text-sm font-bold text-cyan-400">
+                  {targets.c > 0 ? Math.round((totalCarbs / targets.c) * 100) : 0}%
+                </p>
+                <p className="text-xs font-semibold text-gray-400 mt-0.5">Carbs</p>
+                <p className="text-[10px] font-mono font-bold text-gray-500 mt-0.5">
+                  {remainingCarbs}g
+                </p>
+              </div>
+
+              <div>
+                <p className="text-sm font-bold text-purple-400">
+                  {targets.f > 0 ? Math.round((totalFat / targets.f) * 100) : 0}%
+                </p>
+                <p className="text-xs font-semibold text-gray-400 mt-0.5">Fat</p>
+                <p className="text-[10px] font-mono font-bold text-gray-500 mt-0.5">
+                  {remainingFat}g
+                </p>
+              </div>
+
+              <div>
+                <p className="text-sm font-bold text-amber-400">
+                  {targets.p > 0 ? Math.round((totalProtein / targets.p) * 100) : 0}%
+                </p>
+                <p className="text-xs font-semibold text-gray-400 mt-0.5">Protein</p>
+                <p className="text-[10px] font-mono font-bold text-gray-500 mt-0.5">
+                  {remainingProtein}g
+                </p>
+              </div>
             </div>
           </div>
-
-          {/* Macro Circles Grid */}
-          <div className="md:col-span-2 flex space-x-3 bg-[#121A2A] border border-gray-800/80 rounded-2xl p-3">
-            <MacroCircle current={totalCarbs} target={targets.c} colorClass="stroke-cyan-500" label="Carbs" />
-            <MacroCircle current={totalProtein} target={targets.p} colorClass="stroke-emerald-500" label="Protein" />
-            <MacroCircle current={totalFat} target={targets.f} colorClass="stroke-purple-500" label="Fats" />
-          </div>
-
         </div>
 
-        {/* --- INTERACTIVE LOGGING CORE WORKSPACE --- */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          
-          {/* CONTROL CARDS PANEL */}
-          <div className="space-y-4 col-span-1">
-            
-            {/* Database Assistant Box */}
-            <div className="bg-[#121A2A] border border-gray-800 rounded-2xl p-4 space-y-2">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">Database Assistant</h3>
-              <p className="text-[11px] text-gray-500 leading-normal mb-1">Browse standard verification listings to seamlessly allocate macro components.</p>
-              
-              <button 
-                onClick={() => {
-                  setEditingLogItem(null);
-                  setActiveMealType('breakfast');
-                  setIsSearchOpen(true);
-                }} 
-                className="w-full bg-[#00A86B] hover:bg-[#00945D] text-white font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider transition-all flex items-center justify-center space-x-1.5"
-              >
-                <Search className="w-3.5 h-3.5" />
-                <span>Browse Food</span>
-              </button>
+        {/* MEAL CATEGORIES */}
+        <div className="space-y-3">
+          {mealCategories.map((category) => {
+            const categoryLogs = logs.filter(item => item.mealType === category);
+            const categoryCalories = categoryLogs.reduce((sum, item) => sum + (item.calories || 0), 0);
 
-              {/* Added: Custom Recipe Creator Trigger Button */}
-              <button 
-                onClick={() => setIsRecipeCreateOpen(true)}
-                className="w-full bg-emerald-950/40 border border-dashed border-emerald-800/80 text-emerald-400 hover:bg-emerald-950/70 font-bold py-2 rounded-xl text-[10px] uppercase tracking-wider transition-all flex items-center justify-center space-x-1.5"
-              >
-                <Plus className="w-3 h-3 text-[#00A86B]" />
-                <span>Create Custom Recipe</span>
-              </button>
-
-              {/* Custom Food Creator Trigger */}
-              <button 
-                onClick={() => setIsCreateOpen(true)}
-                className="w-full border border-gray-800 hover:border-gray-700 text-gray-300 hover:text-white font-bold py-2 rounded-xl text-[10px] uppercase tracking-wider transition-all flex items-center justify-center space-x-1.5"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Create Custom Food Entry</span>
-              </button>
-
-              {/* Graphical Macro Analytics Navigation Button */}
-              <button 
-                onClick={() => router.push('/dashboard/analytics')}
-                className="w-full bg-[#1C2638] border border-gray-800 hover:border-gray-700 text-gray-300 hover:text-white font-bold py-2.5 rounded-xl text-[10px] uppercase tracking-wider transition-all flex items-center justify-center space-x-1.5 pt-2"
-              >
-                <BarChart3 className="w-3.5 h-3.5 text-cyan-400" />
-                <span>View Macro Analytics & History</span>
-              </button>
-            </div>
-
-            {/* Water Log Module */}
-            <div className="bg-[#121A2A] border border-gray-800 rounded-2xl p-4 space-y-3">
-              <div className="flex justify-between items-center border-b border-gray-800/40 pb-2">
-                <div className="flex items-center space-x-1.5">
-                  <Droplet className="w-3.5 h-3.5 text-cyan-400" />
-                  <h4 className="font-bold text-[11px] uppercase tracking-wider text-white">Water Intake</h4>
-                </div>
-                <p className="text-[11px] font-mono font-bold text-cyan-400">{waterAmount}ml</p>
-              </div>
-
-              {/* Presets */}
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => quickLogWater(250)} className="bg-[#1C2638]/70 border border-gray-800 hover:border-cyan-800 hover:text-cyan-400 text-[10px] font-bold py-2 rounded-xl transition-all">+250 ml</button>
-                <button onClick={() => quickLogWater(500)} className="bg-[#1C2638]/70 border border-gray-800 hover:border-cyan-800 hover:text-cyan-400 text-[10px] font-bold py-2 rounded-xl transition-all">+500 ml</button>
-              </div>
-
-              {/* Custom Input */}
-              <form onSubmit={handleCustomWaterSubmit} className="relative flex items-center mt-2">
-                <input 
-                  type="number" 
-                  min="1" 
-                  placeholder="Exact amount (ml)" 
-                  value={customWater}
-                  onChange={(e) => setCustomWater(e.target.value)}
-                  className="w-full bg-[#1C2638] border border-gray-800 rounded-xl pl-3 pr-16 py-2 text-[11px] text-white focus:outline-none focus:border-cyan-500 placeholder-gray-600 font-mono"
-                />
-                <button 
-                  type="submit" 
-                  className="absolute right-1.5 bg-cyan-950 hover:bg-cyan-900 border border-cyan-800 text-cyan-400 font-bold px-2.5 py-1 rounded-lg text-[10px] uppercase transition-all"
-                >
-                  + Add
-                </button>
-              </form>
-
-              <button onClick={() => setWaterAmount(0) || localStorage.setItem(`water_${currentDate}`, 0)} className="w-full text-center text-[9px] font-mono text-gray-600 hover:text-red-400 transition-colors uppercase pt-1 block tracking-wider">Reset Water</button>
-            </div>
-
-          </div>
-
-          {/* CHRONOLOGICAL MEAL CATEGORY BLOCKS */}
-          <div className="md:col-span-2 space-y-3">
-            {mealCategories.map((category) => {
-              const categoryLogs = logs.filter(item => item.mealType === category);
-              const categoryCalories = categoryLogs.reduce((sum, item) => sum + item.calories, 0);
-
-              return (
-                <div key={category} className="bg-[#121A2A] border border-gray-800/70 rounded-xl p-4 flex flex-col justify-between">
-                  <div>
-                    <div className="flex justify-between items-center border-b border-gray-800/40 pb-2 mb-2">
-                      <div className="flex items-center space-x-2">
-                        {getMealIcon(category)}
-                        <h4 className="font-extrabold text-xs uppercase tracking-wider text-white capitalize">{category}</h4>
-                      </div>
-                      <p className="text-xs font-mono font-bold text-gray-400">{categoryCalories} kcal</p>
-                    </div>
-
-                    {categoryLogs.length === 0 ? (
-                      <p className="text-[11px] text-gray-600 italic py-1 mb-1">Awaiting entries...</p>
-                    ) : (
-                      <div className="space-y-1.5 mb-2">
-                        {categoryLogs.map((item) => (
-                          <div 
-                            key={item._id || item.id} 
-                            className="group flex justify-between items-center bg-[#161F30]/20 border border-gray-800/40 p-3 rounded-xl hover:border-gray-700/80 hover:bg-[#161F30]/40 transition-all"
-                          >
-                            <div className="flex-1 min-w-0 pr-4">
-                              <p className="font-semibold text-xs text-gray-200 truncate">{item.foodName}</p>
-                              <p className="text-[10px] text-gray-500 font-mono mt-0.5">
-                                {item.amount}{item.unit} • C:{Math.round(item.carbs)}g P:{Math.round(item.protein)}g F:{Math.round(item.fat)}g
-                              </p>
-                            </div>
-                            
-                            <div className="flex items-center space-x-3 flex-shrink-0">
-                              <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex items-center space-x-2 transition-all duration-150">
-                                <button 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setEditingLogItem(item);
-                                    setSelectedFoodName(item.foodName);
-                                    setActiveMealType(item.mealType);
-                                    setIsDetailOpen(true);
-                                  }}
-                                  className="p-1.5 hover:bg-[#1C2638] text-gray-400 hover:text-emerald-400 rounded-lg transition-colors"
-                                  title="Edit Log"
-                                >
-                                  <Edit2 className="w-3.5 h-3.5" />
-                                </button>
-                                
-                                <button 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeleteFoodLog(item._id || item.id);
-                                  }}
-                                  className="p-1.5 hover:bg-[#1C2638] text-gray-400 hover:text-red-400 rounded-lg transition-colors"
-                                  title="Delete Log"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-
-                              <p className="text-xs font-mono font-bold text-amber-500 min-w-[55px] text-right">
-                                +{item.calories} kcal
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+            return (
+              <div key={category} className="bg-[#121A2A] border border-gray-800/70 rounded-2xl p-4">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center space-x-2.5">
+                    {getMealIcon(category)}
+                    <h3 className="font-bold text-sm text-white capitalize">{category}</h3>
+                    {categoryCalories > 0 && (
+                      <span className="text-xs font-mono text-gray-400 ml-2">({categoryCalories} cal)</span>
                     )}
                   </div>
 
@@ -445,36 +462,177 @@ export default function FoodDiary() {
                       setActiveMealType(category);
                       setIsSearchOpen(true);
                     }}
-                    className="w-full border border-dashed border-gray-800 hover:border-gray-700 hover:bg-[#161F30]/20 py-2 rounded-xl text-[10px] font-bold text-gray-400 hover:text-white uppercase tracking-widest transition-all flex items-center justify-center space-x-1 mt-1"
+                    className="bg-[#161F30] hover:bg-[#1C2638] text-cyan-400 px-4 py-2 rounded-xl text-xs font-bold transition-all border border-gray-800/80"
                   >
-                    <Plus className="w-3 h-3 text-[#00A86B]" />
-                    <span>Add Food</span>
+                    Log food
                   </button>
                 </div>
-              );
-            })}
-          </div>
 
+                {categoryLogs.length > 0 && (
+                  <div className="mt-3 space-y-2 border-t border-gray-800/60 pt-3">
+                    {categoryLogs.map((item) => (
+                      <div 
+                        key={item._id || item.id} 
+                        className="group flex justify-between items-center bg-[#0B121F]/60 border border-gray-800/40 p-3 rounded-xl hover:border-gray-700/80 transition-all"
+                      >
+                        <div className="flex-1 min-w-0 pr-4">
+                          <p className="font-semibold text-xs text-gray-200 truncate">{item.foodName}</p>
+                          <p className="text-[10px] text-gray-500 font-mono mt-0.5">
+                            {item.amount}{item.unit} • <span className="text-cyan-400 font-bold">C:</span>{Math.round(item.carbs)}g <span className="text-amber-400 font-bold">P:</span>{Math.round(item.protein)}g <span className="text-purple-400 font-bold">F:</span>{Math.round(item.fat)}g
+                          </p>
+                        </div>
+                        
+                        <div className="flex items-center space-x-3 flex-shrink-0">
+                          <div className="opacity-0 group-hover:opacity-100 flex items-center space-x-2 transition-all">
+                            <button 
+                              onClick={() => {
+                                setEditingLogItem(item);
+                                setSelectedFoodName(item.foodName);
+                                setActiveMealType(item.mealType);
+                                setIsDetailOpen(true);
+                              }}
+                              className="p-1 hover:bg-[#1C2638] text-gray-400 hover:text-emerald-400 rounded-lg"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            
+                            <button 
+                              onClick={() => handleDeleteFoodLog(item._id || item.id)}
+                              className="p-1 hover:bg-[#1C2638] text-gray-400 hover:text-red-400 rounded-lg"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          <p className="text-xs font-mono font-bold text-green-500">
+                            +{item.calories} cal
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
 
-        {/* --- OVERLAY POPUP LAYER CONTROLLERS --- */}
+        {/* WATER INTAKE TRACKER */}
+        <div className="bg-[#121A2A] border border-gray-800/80 rounded-2xl p-4 space-y-3">
+          <div className="flex justify-between items-center border-b border-gray-800/60 pb-2">
+            <div className="flex items-center space-x-2">
+              <Droplet className="w-4 h-4 text-cyan-400" />
+              <h4 className="font-bold text-xs text-white uppercase tracking-wider">Water Intake</h4>
+            </div>
+            <p className="text-xs font-mono font-bold text-cyan-400">{waterAmount} ml</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={() => quickLogWater(250)} className="bg-[#161F30] border border-gray-800 hover:border-cyan-800 hover:text-cyan-400 text-xs font-bold py-2 rounded-xl transition-all">+250 ml</button>
+            <button onClick={() => quickLogWater(500)} className="bg-[#161F30] border border-gray-800 hover:border-cyan-800 hover:text-cyan-400 text-xs font-bold py-2 rounded-xl transition-all">+500 ml</button>
+          </div>
+
+          <form onSubmit={handleCustomWaterSubmit} className="relative flex items-center">
+            <input 
+              type="number" 
+              min="1" 
+              placeholder="Exact amount (ml)" 
+              value={customWater}
+              onChange={(e) => setCustomWater(e.target.value)}
+              className="w-full bg-[#161F30] border border-gray-800 rounded-xl pl-3 pr-16 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 placeholder-gray-600 font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            />
+            <button 
+              type="submit" 
+              className="absolute right-1.5 bg-cyan-950 hover:bg-cyan-900 border border-cyan-800 text-cyan-400 font-bold px-2.5 py-1 rounded-lg text-[10px] uppercase transition-all"
+            >
+              + Add
+            </button>
+          </form>
+        </div>
+
+        {/* OVERLAY POPUP MODALS */}
         <SearchFoodModal
           isOpen={isSearchOpen}
           mealType={activeMealType}
+          userId={user?.id || user?._id}
+          showToastNotification={showToastNotification}
           onClose={() => setIsSearchOpen(false)}
-          onSelectFood={(foodItemData) => {
+          
+          onSelectFood={(foodItemData, updatedMealType) => {
             setIsSearchOpen(false);
-            setSelectedFoodName(foodItemData.foodName);
+
+            const finalMealType = updatedMealType || foodItemData.mealType || activeMealType;
+            setActiveMealType(finalMealType.toLowerCase());
+
+            setSelectedFoodName(foodItemData.foodName || foodItemData.recipeName || foodItemData.title);
             
-            setTargetFoodMacros({
-              foodName: `${foodItemData.brand !== 'Generic' ? `[${foodItemData.brand}] ` : ''}${foodItemData.foodName}`,
-              caloriesPer100g: foodItemData.calories,
-              carbsPer100g: foodItemData.carbs,
-              proteinPer100g: foodItemData.protein,
-              fatPer100g: foodItemData.fat
-            });
+            const isWholeItemAggregate = foodItemData.isMealAggregate || foodItemData.isRecipeAggregate;
+
+            if (isWholeItemAggregate) {
+              setTargetFoodMacros({
+                name: foodItemData.foodName || foodItemData.name,
+                totalCalories: foodItemData.calories || 0,
+                totalCarbs: foodItemData.carbs || 0,
+                totalProtein: foodItemData.protein || 0,
+                totalFat: foodItemData.fat || 0,
+                totalSodium: foodItemData.sodium || 0,
+                totalSugar: foodItemData.sugar || 0,
+                totalFiber: foodItemData.fiber || 0,
+                totalCholesterol: foodItemData.cholesterol || 0,
+                totalPotassium: foodItemData.potassium || 0,
+                totalSatFat: foodItemData.satFat || 0,
+                totalPolyFat: foodItemData.polyFat || 0,
+                totalMonoFat: foodItemData.monoFat || 0,
+                totalTransFat: foodItemData.transFat || 0,
+                totalVitaminA: foodItemData.vitaminA || 0,
+                totalVitaminC: foodItemData.vitaminC || 0,
+                totalCalcium: foodItemData.calcium || 0,
+                totalIron: foodItemData.iron || 0,
+                totalVitaminB12: foodItemData.vitaminB12 || 0,
+                totalVitaminD: foodItemData.vitaminD || 0,
+              });
+            } else {
+              setTargetFoodMacros({
+                foodName: `${foodItemData.brand && foodItemData.brand !== 'Generic' ? `[${foodItemData.brand}] ` : ''}${foodItemData.foodName || foodItemData.recipeName || foodItemData.title}`,
+                caloriesPer100g: foodItemData.calories || foodItemData.totalNutrients?.calories || 0,
+                carbsPer100g: foodItemData.carbs || foodItemData.totalNutrients?.carbs || 0,
+                proteinPer100g: foodItemData.protein || foodItemData.totalNutrients?.protein || 0,
+                fatPer100g: foodItemData.fat || foodItemData.totalNutrients?.fat || 0,
+                sodiumPer100g: foodItemData.sodium || 0,
+                sugarPer100g: foodItemData.sugar || 0,
+                fiberPer100g: foodItemData.fiber || 0,
+                cholesterolPer100g: foodItemData.cholesterol || 0,
+                potassiumPer100g: foodItemData.potassium || 0,
+                satFatPer100g: foodItemData.satFat || 0,
+                polyFatPer100g: foodItemData.polyFat || 0,
+                monoFatPer100g: foodItemData.monoFat || 0,
+                transFatPer100g: foodItemData.transFat || 0,
+                vitaminAPer100g: foodItemData.vitaminA || 0,
+                vitaminCPer100g: foodItemData.vitaminC || 0,
+                calciumPer100g: foodItemData.calcium || 0,
+                ironPer100g: foodItemData.iron || 0,
+                vitaminB12Per100g: foodItemData.vitaminB12 || 0,
+                vitaminDPer100g: foodItemData.vitaminD || 0
+                
+
+
+              });
+            }
             
             setIsDetailOpen(true);
+          }}
+          
+          onCreateCustomFood={(foodItem = null) => {
+            setIsSearchOpen(false);
+            setEditingFoodItem(foodItem);
+            setIsCreateOpen(true);
+          }}
+
+          onDeleteCustomFood={handleDeleteCustomFood}
+
+          onCreateRecipe={() => {
+            setIsSearchOpen(false);
+            setIsRecipeCreateOpen(true);
           }}
         />
 
@@ -483,6 +641,7 @@ export default function FoodDiary() {
           foodName={selectedFoodName}
           mealType={activeMealType}
           initialData={editingLogItem || targetFoodMacros} 
+          showToastNotification={showToastNotification}
           onClose={() => {
             setIsDetailOpen(false);
             setEditingLogItem(null);
@@ -492,22 +651,68 @@ export default function FoodDiary() {
           onUpdateLog={handleUpdateFoodLog} 
         />
 
-        <CreateFoodModal 
-          isOpen={isCreateOpen}
-          onClose={() => setIsCreateOpen(false)}
-          userId={user.id}
-          onFoodCreated={() => fetchDailyLogs(user.id, currentDate)}
-        />
+        {user && (
+          <>
+            <CreateFoodModal 
+              isOpen={isCreateOpen}
+              onClose={() => {
+                setIsCreateOpen(false);
+                setEditingFoodItem(null);
+              }}
+              userId={user.id || user._id}
+              foodToEdit={editingFoodItem}
+              showToastNotification={showToastNotification}
+              onFoodCreated={() => {
+                fetchDailyLogs(user.id || user._id, currentDate);
+                showToastNotification(
+                  editingFoodItem ? 'Custom Food Updated' : 'Custom Food Created', 
+                  editingFoodItem ? 'Your changes were saved.' : 'Your food item is saved.', 
+                  'success'
+                );
+                setEditingFoodItem(null);
+              }}
+            />
 
-        {/* Added: Mounted CreateRecipeModal Hook Layer cleanly here */}
-        <CreateRecipeModal
-          isOpen={isRecipeCreateOpen}
-          onClose={() => setIsRecipeCreateOpen(false)}
-          userId={user.id}
-          onRecipeCreated={() => fetchDailyLogs(user.id, currentDate)}
+            <CreateRecipeModal
+              isOpen={isRecipeCreateOpen}
+              onClose={() => setIsRecipeCreateOpen(false)}
+              userId={user.id || user._id}
+              showToastNotification={showToastNotification}
+              onRecipeCreated={() => {
+                fetchDailyLogs(user.id || user._id, currentDate);
+                showToastNotification('Recipe Created', 'Your recipe has been saved.', 'success');
+              }}
+            />
+
+            <CreateMealModal
+              isOpen={isMealCreateOpen}
+              onClose={() => setIsMealCreateOpen(false)}
+              userId={user.id || user._id}
+              showToastNotification={showToastNotification}
+              onConfirmDelete={handleConfirmDeleteMeal}
+              onSaveSuccess={() => fetchDailyLogs(user.id || user._id, currentDate)}
+            />
+          </>
+        )}
+
+        {/* Global Toast Notification */}
+        <Toast
+          show={toast.show}
+          title={toast.title}
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast((prev) => ({ ...prev, show: false }))}
         />
 
       </div>
     </main>
+  );
+}
+
+export default function FoodDiary() {
+  return (
+    <ConfirmProvider>
+      <FoodDiaryContent />
+    </ConfirmProvider>
   );
 }

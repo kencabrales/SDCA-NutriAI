@@ -14,11 +14,17 @@ export async function POST(req) {
 
     const brandContext = brand && brand.toLowerCase() !== 'generic' ? `Brand reference context: ${brand}.` : '';
 
-    const systemInstruction = "You are an elite fitness database analyzer. You break down food items into realistic preparation variations based on user inputs. You always output valid raw JSON arrays.";
-    const targetPrompt = `Generate exactly 3 logical nutritional variations for the input string: "${foodName}". ${brandContext}
-    For example, if input is "Chicken Breast", generate variants for "Cooked", "Raw", and "Steamed". 
-    If a specific brand name like "Tender Juicy" is present in the context, ensure that brand is explicitly retained in the variation objects. 
-    All values must be calculated per 100g standard servings.`;
+    const systemInstruction = `You are an elite fitness database analyzer and nutritionist. 
+    You break down food items into realistic preparation variations based on user inputs and output valid raw JSON.
+
+    CRITICAL CALIBRATION RULES:
+    1. BRANDED / PACKAGED ITEMS: If a specific brand or item is known (e.g. "Purefoods Tender Juicy Hotdog", "Century Tuna"), calculate macros for ONE STANDARD PIECE or SINGLE SERVING (e.g., 1 piece/34g = ~100 kcal), NOT 100g raw bulk density.
+    2. WHOLE / UNBRANDED FOODS: If it is an unbranded generic food (e.g. "Chicken Breast"), calculate macros for 100g standard servings.
+    3. VARIATION TYPES: Provide 3 logical preparation variants (e.g., Boiled, Pan-fried, Grilled). Adjust fats/calories for added cooking oils if applicable.
+    4. ACCURATE SERVING & UNIT: Always specify the realistic serving amount and unit (e.g., servingSize: 34, unit: "g" or "pc").`;
+
+    const targetPrompt = `Generate exactly 3 logical nutritional variations for input: "${foodName}". ${brandContext}
+    Ensure the brand is explicitly retained. Fill precise servingSize and unit fields matching real product guidelines.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
@@ -34,14 +40,16 @@ export async function POST(req) {
               items: {
                 type: "OBJECT",
                 properties: {
-                  label: { type: "STRING" }, // e.g., "Chicken Breast (Cooked)"
+                  label: { type: "STRING" },
                   brand: { type: "STRING" },
+                  servingSize: { type: "NUMBER" },
+                  unit: { type: "STRING" }, // e.g. "g", "oz", "pc", "serving"
                   calories: { type: "INTEGER" },
                   carbs: { type: "INTEGER" },
                   protein: { type: "INTEGER" },
                   fat: { type: "INTEGER" }
                 },
-                required: ["label", "brand", "calories", "carbs", "protein", "fat"]
+                required: ["label", "brand", "servingSize", "unit", "calories", "carbs", "protein", "fat"]
               }
             }
           },

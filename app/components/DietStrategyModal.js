@@ -1,3 +1,4 @@
+// Components/DietStrategyModal.js
 'use client';
 
 import { Settings, X, ChevronUp, ChevronDown, Check } from 'lucide-react';
@@ -154,7 +155,6 @@ export default function DietStrategyModal({
             </div>
           </div>
 
-          {/* Dynamic Macro Allocation Split Row with Live Gram Calculations */}
           <div className="border-t border-gray-800 pt-4 space-y-3">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
               <div>

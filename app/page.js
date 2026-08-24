@@ -5,7 +5,7 @@ import LoginModal from './components/LoginModal';
 import RegisterModal from './components/RegisterModal';
 
 export default function Home() {
-  const [activeModal, setActiveModal] = useState('none'); // 'none', 'login', or 'register'
+  const [activeModal, setActiveModal] = useState('none'); 
   const [passedEmail, setPassedEmail] = useState('');
 
   const openLogin = (email = '') => {
@@ -22,12 +22,6 @@ export default function Home() {
           <span className="text-[#00A86B] text-xl font-bold tracking-tight">logo</span>
           <span className="text-xl font-bold tracking-tight text-white">NutriAI</span>
         </div>
-        <button 
-          onClick={() => openLogin('')} 
-          className="text-sm font-medium text-gray-300 hover:text-white transition-colors"
-        >
-          Login
-        </button>
       </header>
 
       {/* Hero Content */}

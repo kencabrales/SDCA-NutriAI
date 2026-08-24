@@ -28,14 +28,24 @@ export async function POST(request) {
       message: 'Login successful',
       user: { 
         id: user._id.toString(), 
-        firstName: user.firstName, 
-        lastName: user.lastName, 
+        _id: user._id.toString(),
+        username: user.username || '',
+        firstName: user.firstName || '', 
+        lastName: user.lastName || '', 
         email: user.email,
-        bmi: user.bmi,
+        height: user.height || user.heightInput || 0,
+        heightUnit: user.heightUnit || 'cm',
+        weight: user.weight || user.weightInput || user.currentWeight || 0,
+        weightUnit: user.weightUnit || 'kg',
+        sex: user.sex || user.gender || 'male',
+        dob: user.dob || user.dateOfBirth || '',
+        location: user.location || user.country || '',
+        timezone: user.timezone || '',
+        bmi: user.bmi || 0,
         targetCalories: user.targetCalories || 2339,
-        goal: user.goal,
-        activityLevel: user.activityLevel,
-        bodyFat: user.bodyFat
+        goal: user.goal || '',
+        activityLevel: user.activityLevel || '',
+        bodyFat: user.bodyFat || 0
       }
     }, { status: 200 });
   } catch (error) {
