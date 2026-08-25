@@ -564,7 +564,6 @@ export default function NutritionTab({ user }) {
                     <div className="text-[11px] text-slate-400 font-mono mt-0.5">
                       <span className="text-blue-400 font-bold">{avgWaterMl} ml</span> / {userGoals.waterMl} ml goal
                     </div>
-                    <div className="text-[9px] text-slate-600 mt-0.5">This device only — not yet synced across devices</div>
                   </div>
                 </div>
 
@@ -607,8 +606,7 @@ export default function NutritionTab({ user }) {
               <div className="bg-[#121824] border border-slate-800/80 rounded-2xl p-4 space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-800/60 pb-3">
                   <div className="flex items-center space-x-2 text-xs font-bold text-slate-300 uppercase tracking-wider">
-                    <Layers className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Meal Macro Breakdown</span>
+                    <span>Daily Macro Breakdown</span>
                   </div>
                   <span className="text-[10px] font-mono text-slate-500">Average Grams / Meal</span>
                 </div>
@@ -671,7 +669,7 @@ export default function NutritionTab({ user }) {
                   className="w-full flex items-center justify-between p-3.5 bg-[#121824] hover:bg-[#161e2e] border border-slate-800 rounded-2xl transition-all group"
                 >
                   <span className="text-xs font-bold text-slate-300 group-hover:text-cyan-400 transition-colors">
-                    Advanced Nutrients & Micro Breakdown
+                    Advanced Nutrients & Micro Breakdown Average
                   </span>
                   {showAdvanced ? (
                     <ChevronUp className="w-4 h-4 text-cyan-400" />

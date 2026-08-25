@@ -28,6 +28,9 @@ export function useDashboardData() {
   const [todayLogs, setTodayLogs] = useState([]);
   const [todayWater, setTodayWater] = useState(0);
   const [todaySteps, setTodaySteps] = useState(0);
+  const [behaviorInsight, setBehaviorInsight] = useState(null);
+  const [healthRisk, setHealthRisk] = useState(null);
+  const [isLoadingInsights, setIsLoadingInsights] = useState(false);
 
   // --- CALENDAR LOGIC (all via UTC-anchored calendar math — see lib/dateUtils.js) ---
   const weekDays = useMemo(() => {
@@ -73,11 +76,11 @@ export function useDashboardData() {
         setTodayLogs([]);
       }
 
-      const savedWater = localStorage.getItem(`water_${dateStr}`);
-      setTodayWater(savedWater ? parseInt(savedWater, 10) : 0);
+const savedWater = localStorage.getItem(`water_${userId}_${dateStr}`);
+setTodayWater(savedWater ? parseInt(savedWater, 10) : 0);
 
-      const savedSteps = localStorage.getItem(`steps_${dateStr}`);
-      setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 2825);
+const savedSteps = localStorage.getItem(`steps_${userId}_${dateStr}`);
+setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
 
       // Fetch 60 days of history using explicit start/end dates to keep past dots working
       const dateAnchor = dateStringToUTCAnchor(dateStr);
@@ -104,6 +107,23 @@ export function useDashboardData() {
     }
   }, []);
 
+    const fetchInsights = useCallback(async (userId) => {
+    if (!userId) return;
+    setIsLoadingInsights(true);
+    try {
+      const res = await fetch(`/api/ai/insights?userId=${userId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setBehaviorInsight(data.behaviorInsight || null);
+        setHealthRisk(data.healthRisk || null);
+      }
+    } catch (err) {
+      console.error("Failed to load AI insights:", err);
+    } finally {
+      setIsLoadingInsights(false);
+    }
+  }, []);
+
   // --- INITIAL HYDRATION & DATA FETCH ---
   useEffect(() => {
     const session = localStorage.getItem('user');
@@ -116,8 +136,9 @@ export function useDashboardData() {
     setUser(parsedUser);
 
     fetchDashboardData(parsedUser.id || parsedUser._id, selectedDate);
+    fetchInsights(parsedUser.id || parsedUser._id);
     setIsHydrated(true);
-  }, [router, selectedDate, fetchDashboardData]);
+  }, [router, selectedDate, fetchDashboardData, fetchInsights]);
 
   // --- RE-FETCH ON TAB FOCUS ---
   useEffect(() => {
@@ -148,11 +169,12 @@ export function useDashboardData() {
     });
   };
 
-  const handleWaterAdd = (amount) => {
-    const updated = Math.max(0, todayWater + amount);
-    setTodayWater(updated);
-    localStorage.setItem(`water_${selectedDate}`, updated.toString());
-  };
+const handleWaterAdd = (amount) => {
+  const updated = Math.max(0, todayWater + amount);
+  setTodayWater(updated);
+  const uid = user?.id || user?._id;
+  if (uid) localStorage.setItem(`water_${uid}_${selectedDate}`, updated.toString());
+};
 
   const calorieGoal = Number(user?.targetCalories) || 2000;
 
@@ -209,6 +231,9 @@ export function useDashboardData() {
     proteinGoal,
     mealBreakdown,
     displayDateHeader,
+    behaviorInsight,
+    healthRisk,
+    isLoadingInsights,
     router
   };
 }

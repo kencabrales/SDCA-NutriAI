@@ -55,7 +55,6 @@ export default function LoginModal({ isOpen, onClose, onSwitchToRegister, initia
         {/* Header Banner Area */}
         <div className="bg-[#00A86B] px-8 py-6 text-center">
           <h2 className="text-3xl font-extrabold text-white tracking-wide">NutriAI</h2>
-          <p className="text-emerald-100/80 text-xs font-medium mt-1">Login to your AI Coach</p>
         </div>
 
         <div className="p-8">

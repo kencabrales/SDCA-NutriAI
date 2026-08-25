@@ -2,7 +2,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, AlertTriangle } from 'lucide-react';
 
 import DashboardHeader from '../components/dashboard/DashboardHeader';
 import WeeklyCalendar from '../components/dashboard/WeeklyCalendar';
@@ -13,26 +13,6 @@ import IoTScaleBridge from '../components/dashboard/IoTScaleBridge';
 import ProfileSettingsModal from '../components/profile/ProfileSettingsModal';
 import { useDashboardData } from '../hooks/useDashboardData';
 
-// Steady Progress Banner integrated directly
-function SteadyProgressBanner() {
-  return (
-    <div className="bg-[#121A2A] border border-gray-800/80 rounded-xl px-3.5 py-2 flex items-center justify-between">
-      <div className="flex items-center gap-2.5">
-        <div className="p-1 rounded-md bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
-          <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[9px] font-mono font-bold tracking-wider uppercase text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded border border-cyan-500/20">
-            STEADY PROGRESS
-          </span>
-          <p className="text-xs font-semibold text-gray-200">
-            <span className="font-bold text-white">Optimal Consistency:</span> Your meal timing & caloric distribution are well-balanced across your daily schedule.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function Dashboard() {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -63,6 +43,9 @@ export default function Dashboard() {
     proteinGoal,
     mealBreakdown,
     displayDateHeader,
+    behaviorInsight,
+    healthRisk,
+    isLoadingInsights,
     router
   } = useDashboardData();
 
@@ -98,19 +81,47 @@ export default function Dashboard() {
         />
 
         <WeeklyCalendar 
-          displayDateHeader={displayDateHeader}
-          selectedDate={selectedDate}
-          setSelectedDate={setSelectedDate}
-          streakCount={streakCount}
-          weekDays={weekDays}
-          handlePrevWeek={handlePrevWeek}
-          handleNextWeek={handleNextWeek}
-          loggedDates={loggedDates}
-        />
+  displayDateHeader={displayDateHeader}
+  selectedDate={selectedDate}
+  setSelectedDate={setSelectedDate}
+  streakCount={streakCount}
+  weekDays={weekDays}
+  handlePrevWeek={handlePrevWeek}
+  handleNextWeek={handleNextWeek}
+  loggedDates={loggedDates}
+/>
 
-        <SteadyProgressBanner />
+{/* HEALTH RISK BANNER — only renders when a real risk was flagged */}
+{healthRisk && (
+  <div className="bg-amber-950/30 border border-amber-700/50 rounded-2xl p-4 flex items-start gap-3">
+    <div className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 flex-shrink-0 mt-0.5">
+      <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+    </div>
+    <div>
+      <h4 className="text-[10px] font-bold text-amber-400 uppercase tracking-widest mb-1">Health Alert</h4>
+      <p className="text-xs text-amber-100/90 leading-relaxed">{healthRisk}</p>
+    </div>
+  </div>
+)}
 
-        <MacroCards 
+{/* BEHAVIOR INSIGHT CARD */}
+{(isLoadingInsights || behaviorInsight) && (
+  <div className="bg-[#121A2A] border border-gray-800/80 rounded-2xl p-4 flex items-start gap-3">
+    <div className="p-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex-shrink-0 mt-0.5">
+      <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+    </div>
+    <div>
+      <h4 className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-1">Your Patterns</h4>
+      {isLoadingInsights ? (
+        <p className="text-xs text-gray-500 font-mono">Analyzing...</p>
+      ) : (
+        <p className="text-xs text-gray-300 leading-relaxed">{behaviorInsight}</p>
+      )}
+    </div>
+  </div>
+)}
+
+<MacroCards
           consumedCalories={consumedCalories}
           calorieGoal={calorieGoal}
           remainingCalories={remainingCalories}

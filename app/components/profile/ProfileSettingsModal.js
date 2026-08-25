@@ -45,7 +45,7 @@ useEffect(() => {
   if (isOpen && user) {
     setFormData({ ...user });
   }
-}, [isOpen]);
+}, [isOpen, user]);
 
 if (!isOpen) return null;
 

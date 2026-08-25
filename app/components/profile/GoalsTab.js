@@ -113,6 +113,15 @@ export const calculateMacrosFromCalories = (calories, carbsPct = 40, proteinPct 
   };
 };
 
+const deriveStrategyFromWeights = (current, goal) => {
+  const c = Number(current);
+  const g = Number(goal);
+  if (!c || !g || isNaN(c) || isNaN(g)) return null;
+  const diff = g - c;
+  if (Math.abs(diff) < 0.05) return 'maintain'; // treat as equal within rounding
+  return diff < 0 ? 'cut' : 'bulk';
+};
+
 // Backward-compatible combined helper, kept in case anything else imports the old name.
 export const calculateNutrientGoals = (data, weightUnit = 'kg') => {
   const auto = calculateAutoTargets(data, weightUnit);
@@ -367,10 +376,18 @@ export default function GoalsTab({
                 step="0.1"
                 name="currentWeight"
                 value={formData?.currentWeight ?? formData?.weight ?? ''}
-                onChange={(e) => {
+                                onChange={(e) => {
                   handleChange(e);
                   triggerChange('weight', e.target.value);
-                  recalcCalorieTarget({ currentWeight: e.target.value });
+                  const newStrategy = deriveStrategyFromWeights(e.target.value, formData?.goalWeight);
+                  if (newStrategy) {
+                    triggerChange('nutritionalStrategy', newStrategy);
+                    triggerChange('weeklyPace', newStrategy);
+                    triggerChange('weeklyGoal', newStrategy);
+                    recalcCalorieTarget({ currentWeight: e.target.value, nutritionalStrategy: newStrategy });
+                  } else {
+                    recalcCalorieTarget({ currentWeight: e.target.value });
+                  }
                 }}
                 placeholder="0.0"
                 className={numberInputStyles}
@@ -384,12 +401,21 @@ export default function GoalsTab({
               <span className="text-xs font-semibold text-gray-200">Goal Weight</span>
             </div>
             <div className="flex items-center space-x-1.5">
-              <input
+                            <input
                 type="number"
                 step="0.1"
                 name="goalWeight"
                 value={formData?.goalWeight ?? ''}
-                onChange={handleChange}
+                onChange={(e) => {
+                  handleChange(e);
+                  const newStrategy = deriveStrategyFromWeights(currentWeight, e.target.value);
+                  if (newStrategy) {
+                    triggerChange('nutritionalStrategy', newStrategy);
+                    triggerChange('weeklyPace', newStrategy);
+                    triggerChange('weeklyGoal', newStrategy);
+                    recalcCalorieTarget({ nutritionalStrategy: newStrategy });
+                  }
+                }}
                 placeholder="0.0"
                 className={numberInputStyles}
               />
@@ -414,7 +440,7 @@ export default function GoalsTab({
                   handleChange(e);
                   recalcCalorieTarget({ bodyFat: e.target.value });
                 }}
-                placeholder="None"
+                placeholder="Optional"
                 className={numberInputStyles}
               />
               <span className="text-xs font-semibold text-gray-400">%</span>

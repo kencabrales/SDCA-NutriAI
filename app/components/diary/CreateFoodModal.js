@@ -29,7 +29,7 @@ const INITIAL_FORM = {
   privacy: 'Public',
   description: '',
   servingAmount: '1',
-  servingUnit: 'cup',
+  servingUnit: 'g',
   servingsPerContainer: '1',
   calories: '',
   protein: '',
@@ -238,7 +238,7 @@ export default function CreateFoodModal({
                 <input
                   type="text"
                   name="brandName"
-                  placeholder="ex. Campbell's"
+                  placeholder="Lucky Me"
                   value={form.brandName}
                   onChange={handleChange}
                   className="bg-transparent text-right text-sm text-cyan-400 placeholder-gray-600 focus:outline-none w-1/2"
@@ -265,7 +265,7 @@ export default function CreateFoodModal({
                 <input
                   type="text"
                   name="description"
-                  placeholder="ex. Chicken Soup"
+                  placeholder="ex. Pancit Canton"
                   value={form.description}
                   onChange={handleChange}
                   className="bg-transparent text-right text-sm text-cyan-400 placeholder-gray-600 focus:outline-none w-1/2"
@@ -344,8 +344,8 @@ export default function CreateFoodModal({
 
               <div className="space-y-3 pb-3 border-b border-gray-800">
                 {[
-                  { label: 'Calories', name: 'calories', unit: 'kcal', color: 'text-cyan-400' },
-                  { label: 'Protein', name: 'protein', unit: 'g', color: 'text-emerald-400' },
+                  { label: 'Calories', name: 'calories', unit: 'kcal', color: 'text-emerald-400' },
+                  { label: 'Protein', name: 'protein', unit: 'g', color: 'text-amber-400' },
                   { label: 'Total Carbs', name: 'carbs', unit: 'g', color: 'text-cyan-400' },
                   { label: 'Total Fat', name: 'fat', unit: 'g', color: 'text-purple-400' },
                 ].map((macro) => (

@@ -47,19 +47,14 @@ export default function DashboardHeader({ user, calorieGoal, onOpenProfile, onLo
           <span>Profile</span>
         </button>
 
-        <button onClick={() => router.push('/dashboard/analytics')} className="flex items-center space-x-1.5 bg-[#121A2A] hover:bg-[#1C2638] text-gray-300 hover:text-white px-2.5 py-1 rounded-xl text-[11px] font-semibold uppercase tracking-wider transition-all border border-gray-800">
+        {/* <button onClick={() => router.push('/dashboard/analytics')} className="flex items-center space-x-1.5 bg-[#121A2A] hover:bg-[#1C2638] text-gray-300 hover:text-white px-2.5 py-1 rounded-xl text-[11px] font-semibold uppercase tracking-wider transition-all border border-gray-800">
           <BarChart3 className="w-3.5 h-3.5 text-cyan-400" />
           <span>Analytics</span>
-        </button>
+        </button> */}
 
         <button onClick={() => router.push('/dashboard/diary')} className="flex items-center space-x-1.5 bg-[#00A86B] hover:bg-[#00945D] text-white px-2.5 py-1 rounded-xl text-[11px] font-semibold uppercase tracking-wider transition-all shadow-md shadow-[#00A86B]/10">
           <Apple className="w-3.5 h-3.5" />
           <span>Food Diary</span>
-        </button>
-
-        <button onClick={onLogout} className="flex items-center space-x-1.5 bg-[#161F30] hover:bg-red-950/20 border border-gray-800 hover:border-red-900/40 text-gray-300 hover:text-red-400 px-2.5 py-1 rounded-xl text-[11px] font-semibold uppercase tracking-wider transition-all">
-          <LogOut className="w-3.5 h-3.5" />
-          <span>Logout</span>
         </button>
       </div>
     </header>

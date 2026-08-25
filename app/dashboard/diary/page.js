@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Apple, Sun, Moon, Cookie, Droplet, Edit2, Trash2, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { ArrowLeft, Apple, Sun, Moon, Cookie, Droplet, Edit2, Trash2, ChevronLeft, ChevronRight, Calendar, Sparkles } from 'lucide-react';
 
 import CreateFoodModal from '../../components/diary/CreateFoodModal';
 import SearchFoodModal from '../../components/diary/LogFoodModal';
@@ -12,6 +12,12 @@ import CreateRecipeModal from '../../components/diary/CreateRecipeModal';
 import CreateMealModal from '../../components/diary/CreateMealModal';
 import Toast from '../../components/Toast';
 import { ConfirmProvider, useConfirm } from '../../components/ConfirmContext';
+import {
+  getTodayPH,
+  dateStringToUTCAnchor,
+  utcAnchorToDateString,
+  addDaysUTC,
+} from '@/lib/dateUtils';
 
 function FoodDiaryContent() {
   const [user, setUser] = useState(null);
@@ -21,6 +27,8 @@ function FoodDiaryContent() {
   const [loading, setLoading] = useState(false);
   const [currentDate, setCurrentDate] = useState('');
   const [isHydrated, setIsHydrated] = useState(false);
+  const [mealSuggestion, setMealSuggestion] = useState(null);
+  const [isLoadingSuggestion, setIsLoadingSuggestion] = useState(false);
   
   // Modals and Food Editing State
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -53,37 +61,64 @@ function FoodDiaryContent() {
   const router = useRouter();
   const mealCategories = ['breakfast', 'lunch', 'dinner', 'snacks'];
 
-  const fetchDailyLogs = useCallback(async (userId, dateStr) => {
-    if (!dateStr || !userId) return;
-    try {
-      const res = await fetch(`/api/food-log?userId=${userId}&date=${dateStr}`);
-      if (res.ok) {
-        const data = await res.json();
-        setLogs(data.logs || []);
-      }
-    } catch (err) {
-      console.error("Database tracking sync crash:", err);
+const fetchDailyLogs = useCallback(async (userId, dateStr) => {
+  if (!dateStr || !userId) return;
+  try {
+    const res = await fetch(`/api/food-log?userId=${userId}&date=${dateStr}`);
+    if (res.ok) {
+      const data = await res.json();
+      setLogs(data.logs || []);
     }
-  }, []);
+  } catch (err) {
+    console.error("Database tracking sync crash:", err);
+  }
+}, []);
 
-  useEffect(() => {
-    const today = new Date().toISOString().split('T')[0];
-    setCurrentDate(today);
-
-    const session = localStorage.getItem('user');
-    if (!session) {
-      router.push('/');
-    } else {
-      const parsedUser = JSON.parse(session);
-      setUser(parsedUser);
-      fetchDailyLogs(parsedUser.id || parsedUser._id, today);
-      
-      const savedWater = localStorage.getItem(`water_${today}`);
-      if (savedWater) setWaterAmount(parseInt(savedWater, 10));
-      setIsHydrated(true);
+// AI meal suggestion always analyzes TODAY (Philippine time), full stop.
+// It intentionally does NOT accept a date argument — that's what let the
+// calendar navigation drag it into re-analyzing past days and firing on
+// every click. `forceRefresh` should only be true when a food log actually
+// changed for today; a plain page load/refresh leaves it false so the
+// backend serves its cached result instead of spending another AI call.
+const fetchMealSuggestion = useCallback(async (userId, forceRefresh = false) => {
+  if (!userId) return;
+  setIsLoadingSuggestion(true);
+  try {
+    const todayStr = getTodayPH();
+    const refreshParam = forceRefresh ? '&refresh=true' : '';
+    const res = await fetch(`/api/ai/insights?userId=${userId}&date=${todayStr}${refreshParam}`);
+    if (res.ok) {
+      const data = await res.json();
+      setMealSuggestion(data.mealSuggestion || null);
     }
-  }, [router, fetchDailyLogs]);
+  } catch (err) {
+    console.error("Failed to fetch meal suggestion:", err);
+  } finally {
+    setIsLoadingSuggestion(false);
+  }
+}, []);
 
+useEffect(() => {
+  const today = getTodayPH();
+  setCurrentDate(today);
+
+  const session = localStorage.getItem('user');
+  if (!session) {
+    router.push('/');
+  } else {
+    const parsedUser = JSON.parse(session);
+    setUser(parsedUser);
+    fetchDailyLogs(parsedUser.id || parsedUser._id, today);
+    fetchMealSuggestion(parsedUser.id || parsedUser._id);
+    
+    const savedWater = localStorage.getItem(`water_${today}`);
+    if (savedWater) setWaterAmount(parseInt(savedWater, 10));
+    setIsHydrated(true);
+  }
+}, [router, fetchDailyLogs, fetchMealSuggestion]);
+
+  // Browsing the calendar only ever changes which day's LOGS you're looking
+  // at. It never touches the AI suggestion — that stays pinned to today.
   const handleDateChange = (newDateStr) => {
     setCurrentDate(newDateStr);
     if (user) {
@@ -94,31 +129,25 @@ function FoodDiaryContent() {
   };
 
   const adjustDateOffset = (offsetAmount) => {
-    const current = new Date(currentDate);
-    current.setDate(current.getDate() + offsetAmount);
-    const calculatedISO = current.toISOString().split('T')[0];
+    const anchor = dateStringToUTCAnchor(currentDate);
+    const calculatedISO = utcAnchorToDateString(addDaysUTC(anchor, offsetAmount));
     handleDateChange(calculatedISO);
   };
 
   const getDisplayDateText = (dateStr) => {
-    const today = new Date().toISOString().split('T')[0];
-    const yesterdayObj = new Date();
-    yesterdayObj.setDate(new Date().getDate() - 1);
-    const yesterday = yesterdayObj.toISOString().split('T')[0];
-    
-    const tomorrowObj = new Date();
-    tomorrowObj.setDate(new Date().getDate() + 1);
-    const tomorrow = tomorrowObj.toISOString().split('T')[0];
+    const today = getTodayPH();
+    const todayAnchor = dateStringToUTCAnchor(today);
+    const yesterday = utcAnchorToDateString(addDaysUTC(todayAnchor, -1));
+    const tomorrow = utcAnchorToDateString(addDaysUTC(todayAnchor, 1));
 
     if (dateStr === today) return 'Today';
     if (dateStr === yesterday) return 'Yesterday';
     if (dateStr === tomorrow) return 'Tomorrow';
 
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      month: 'long',
-      day: 'numeric',
-      year: 'numeric'
-    });
+    const anchor = dateStringToUTCAnchor(dateStr);
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC',
+    }).format(anchor);
   };
 
   const handleConfirmAddFood = async (foodPayload) => {
@@ -131,9 +160,15 @@ function FoodDiaryContent() {
         body: JSON.stringify({ userId: user.id || user._id, date: currentDate, ...foodPayload })
       });
 
-      if (res.ok) {
-        fetchDailyLogs(user.id || user._id, currentDate);
-        const userRes = await fetch(`/api/user/profile?userId=${user.id || user._id}`);
+if (res.ok) {
+  fetchDailyLogs(user.id || user._id, currentDate);
+  // Only refresh the AI suggestion if the log we just added actually
+  // belongs to today — logging a food entry to a past date shouldn't
+  // touch today's suggestion at all.
+  if (currentDate === getTodayPH()) {
+    fetchMealSuggestion(user.id || user._id, true);
+  }
+  const userRes = await fetch(`/api/user/profile?userId=${user.id || user._id}`);
         if (userRes.ok) {
           const updatedUserData = await userRes.json();
           const newUserObj = { ...user, ...updatedUserData };
@@ -164,6 +199,9 @@ function FoodDiaryContent() {
       });
       if (res.ok) {
         fetchDailyLogs(user.id || user._id, currentDate);
+        if (currentDate === getTodayPH()) {
+          fetchMealSuggestion(user.id || user._id, true);
+        }
         showToastNotification('Log Updated', 'Your entry was updated successfully.', 'success');
       } else {
         showToastNotification('Error Updating', 'Failed to update entry.', 'error');
@@ -191,6 +229,9 @@ function FoodDiaryContent() {
       const res = await fetch(`/api/food-log/${logId}`, { method: 'DELETE' });
       if (res.ok) {
         fetchDailyLogs(user.id || user._id, currentDate);
+        if (currentDate === getTodayPH()) {
+          fetchMealSuggestion(user.id || user._id, true);
+        }
         
         const userRes = await fetch(`/api/user/profile?userId=${user.id || user._id}`);
         if (userRes.ok) {
@@ -358,6 +399,25 @@ function FoodDiaryContent() {
             </button>
           </div>
         </div>
+
+        {/* AI Suggestion only ever reflects TODAY — shown regardless of which
+            day you're browsing in the calendar above, so it never appears to
+            "follow" the date picker. */}
+        {(isLoadingSuggestion || mealSuggestion) && (
+          <div className="bg-gradient-to-br from-emerald-950/40 to-[#121A2A] border border-emerald-800/40 rounded-2xl p-4 flex items-start gap-3">
+            <div className="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex-shrink-0 mt-0.5">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+            </div>
+            <div>
+              <h4 className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-1">AI Suggestion &middot; Today</h4>
+              {isLoadingSuggestion ? (
+                <p className="text-xs text-gray-500 font-mono">Thinking...</p>
+              ) : (
+                <p className="text-xs text-gray-300 leading-relaxed">{mealSuggestion}</p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* MINIMALIST CALORIE & MACRO DASHBOARD */}
         <div className="bg-[#121A2A] border border-gray-800/80 rounded-2xl p-6">
@@ -591,33 +651,34 @@ function FoodDiaryContent() {
                 totalVitaminB12: foodItemData.vitaminB12 || 0,
                 totalVitaminD: foodItemData.vitaminD || 0,
               });
-            } else {
-              setTargetFoodMacros({
-                foodName: `${foodItemData.brand && foodItemData.brand !== 'Generic' ? `[${foodItemData.brand}] ` : ''}${foodItemData.foodName || foodItemData.recipeName || foodItemData.title}`,
-                caloriesPer100g: foodItemData.calories || foodItemData.totalNutrients?.calories || 0,
-                carbsPer100g: foodItemData.carbs || foodItemData.totalNutrients?.carbs || 0,
-                proteinPer100g: foodItemData.protein || foodItemData.totalNutrients?.protein || 0,
-                fatPer100g: foodItemData.fat || foodItemData.totalNutrients?.fat || 0,
-                sodiumPer100g: foodItemData.sodium || 0,
-                sugarPer100g: foodItemData.sugar || 0,
-                fiberPer100g: foodItemData.fiber || 0,
-                cholesterolPer100g: foodItemData.cholesterol || 0,
-                potassiumPer100g: foodItemData.potassium || 0,
-                satFatPer100g: foodItemData.satFat || 0,
-                polyFatPer100g: foodItemData.polyFat || 0,
-                monoFatPer100g: foodItemData.monoFat || 0,
-                transFatPer100g: foodItemData.transFat || 0,
-                vitaminAPer100g: foodItemData.vitaminA || 0,
-                vitaminCPer100g: foodItemData.vitaminC || 0,
-                calciumPer100g: foodItemData.calcium || 0,
-                ironPer100g: foodItemData.iron || 0,
-                vitaminB12Per100g: foodItemData.vitaminB12 || 0,
-                vitaminDPer100g: foodItemData.vitaminD || 0
-                
-
-
-              });
-            }
+} else {
+  setTargetFoodMacros({
+    foodName: `${foodItemData.brand && foodItemData.brand !== 'Generic' ? `[${foodItemData.brand}] ` : ''}${foodItemData.foodName || foodItemData.recipeName || foodItemData.title}`,
+    calories: foodItemData.calories || 0,
+    carbs: foodItemData.carbs || 0,
+    protein: foodItemData.protein || 0,
+    fat: foodItemData.fat || 0,
+    sodium: foodItemData.sodium || 0,
+    sugar: foodItemData.sugar || 0,
+    fiber: foodItemData.fiber || 0,
+    cholesterol: foodItemData.cholesterol || 0,
+    potassium: foodItemData.potassium || 0,
+    satFat: foodItemData.satFat || 0,
+    polyFat: foodItemData.polyFat || 0,
+    monoFat: foodItemData.monoFat || 0,
+    transFat: foodItemData.transFat || 0,
+    vitaminA: foodItemData.vitaminA || 0,
+    vitaminC: foodItemData.vitaminC || 0,
+    calcium: foodItemData.calcium || 0,
+    iron: foodItemData.iron || 0,
+    vitaminB12: foodItemData.vitaminB12 || 0,
+    vitaminD: foodItemData.vitaminD || 0,
+    amount: foodItemData.amount || 100,
+    defaultServingAmount: foodItemData.defaultServingAmount || foodItemData.amount || 100,
+    unit: foodItemData.unit || 'g',
+    numberOfServings: foodItemData.numberOfServings || 1,
+  });
+}
             
             setIsDetailOpen(true);
           }}

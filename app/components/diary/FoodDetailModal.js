@@ -39,7 +39,16 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
           setWeightInGrams(initAmount);
         }
       } else {
-        const defaultAmount = Number(initialData?.amount || initialData?.servingAmount || 100);
+        // Plain search-result / normalizeItem-shaped data (custom foods and
+        // API foods alike). `amount` here is the nutrition-math reference
+        // (e.g. 100 for Open Food Facts' per-100g values, or the food's true
+        // serving for custom foods). `defaultServingAmount` is the food's
+        // real-world serving size, used purely to pre-fill what the user
+        // sees — it does NOT change how the nutrition math is scaled below,
+        // since that still reads `initialData.amount` as the reference.
+        const defaultAmount = Number(
+          initialData?.defaultServingAmount || initialData?.amount || initialData?.servingAmount || 100
+        );
         setWeightInGrams(defaultAmount);
         setInputValue(defaultAmount);
         setServings(Number(initialData?.numberOfServings || 1));
@@ -171,6 +180,10 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
     } else {
       // Robust fallback: search results, LogFoodModal.normalizeItem output,
       // and anything else shaped with plain field names + a reference amount.
+      // NOTE: referenceBaseAmount intentionally reads `amount` (the
+      // nutrition-math reference, e.g. 100 for per-100g API data), NOT
+      // `defaultServingAmount` (the display-only real-world serving) — mixing
+      // those up would silently corrupt the scaling math.
       const rawCal = Number(initialData?.calories || initialData?.nf_calories || initialData?.energy || 0);
       const rawCarbs = Number(initialData?.carbs || initialData?.carbohydrates || initialData?.nf_total_carbohydrate || 0);
       const rawPro = Number(initialData?.protein || initialData?.nf_protein || 0);
@@ -363,8 +376,8 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
           {/* Macros Preview Module */}
           <div className="border-t border-gray-800/60 pt-4 grid grid-cols-4 gap-2 text-center">
             <div className="bg-[#161F30]/30 border border-gray-800/40 p-2 rounded-xl flex flex-col justify-center">
-              <p className="text-sm font-black text-amber-500 font-mono">{baseCalories}</p>
-              <p className="text-[8px] uppercase tracking-widest text-gray-500 font-bold mt-0.5">Cal</p>
+              <p className="text-sm font-black text-emerald-500 font-mono">{baseCalories}</p>
+              <p className="text-[8px] uppercase tracking-widest text-gray-500 font-bold mt-0.5">KCal</p>
             </div>
             <div className="bg-[#161F30]/30 border border-gray-800/40 p-2 rounded-xl">
               <p className="text-xs font-bold text-cyan-400 font-mono">{baseCarbs}g</p>
@@ -375,7 +388,7 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
               <p className="text-[8px] uppercase tracking-widest text-gray-500 font-bold mt-0.5">Fat</p>
             </div>
             <div className="bg-[#161F30]/30 border border-gray-800/40 p-2 rounded-xl">
-              <p className="text-xs font-bold text-emerald-400 font-mono">{baseProtein}g</p>
+              <p className="text-xs font-bold text-amber-400 font-mono">{baseProtein}g</p>
               <p className="text-[8px] uppercase tracking-widest text-gray-500 font-bold mt-0.5">Protein</p>
             </div>
           </div>

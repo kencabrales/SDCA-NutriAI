@@ -155,6 +155,8 @@ const [clearedIds, setClearedIds] = useState([]);
 
   const normalizeItem = (item) => {
     if (!item) return null;
+    console.log('normalizeItem received:', item.foodName, 'amount:', item.amount, 'defaultServingAmount:', item.defaultServingAmount);
+
 
     const getVal = (...keys) => {
       for (const k of keys) {
@@ -175,7 +177,23 @@ const [clearedIds, setClearedIds] = useState([]);
     };
 
     const detectedUnit = item.unit || item.servingUnit || item.metricUnit || 'g';
-    const detectedAmount = Number(item.amount || item.servingAmount || item.servingQty || item.servingSizeQty || 100);
+const parseNumeric = (val) => {
+  if (val === undefined || val === null || val === '') return null;
+  if (typeof val === 'number' && !isNaN(val)) return val;
+  const match = String(val).match(/([\d.]+)/);
+  if (!match) return null;
+  const num = Number(match[1]);
+  return isNaN(num) ? null : num;
+};
+
+const detectedAmount =
+  parseNumeric(item.amount) ||
+  parseNumeric(item.servingAmount) ||
+  parseNumeric(item.servingQty) ||
+  parseNumeric(item.servingSizeQty) ||
+  parseNumeric(item.servingSize) ||
+  100;
+    const detectedDefaultServing = parseNumeric(item.defaultServingAmount) || detectedAmount;
     const resolvedName = item.foodName || item.recipeName || item.title || item.name || 'Food Item';
 
     return {
@@ -200,6 +218,7 @@ const [clearedIds, setClearedIds] = useState([]);
 
       amount: detectedAmount,
       servingAmount: detectedAmount,
+      defaultServingAmount: detectedDefaultServing,
       servingSize: item.servingSize || `${detectedAmount} ${detectedUnit}`,
       unit: detectedUnit,
       numberOfServings: Number(item.numberOfServings || item.servings || 1),
@@ -771,7 +790,15 @@ const getDisplayList = () => {
   } else {
     const normalized = normalizeItem(item);
     name = normalized.foodName;
-    subtext = `${normalized.calories} cal, ${normalized.amount} ${normalized.unit}, ${item.brandName || item.brand || name}`;
+    // Show the food's real-world serving size (defaultServingAmount) rather
+    // than the internal calculation reference (amount, which is 100 for
+    // API-sourced foods since their nutrition values are per-100g).
+    // Calories at that real serving are scaled down from the per-`amount`
+    // reference value so the number shown matches the number the user will
+    // actually get if they log it at the default serving.
+    const scaleToDefault = normalized.amount > 0 ? normalized.defaultServingAmount / normalized.amount : 1;
+    const displayCalories = Math.round((normalized.calories || 0) * scaleToDefault);
+    subtext = `${displayCalories} cal, ${normalized.defaultServingAmount}${normalized.unit}, ${item.brandName || item.brand || name}`;
     Icon = null;
     onRowClick = () => {
       if (isCustomFood && !isSelectingForMeal && !isSelectingForRecipe) {

@@ -23,32 +23,54 @@ export async function GET(req) {
     // and the rest of the app actually read (item.fiber, item.sodium, ...).
     // Without this, a custom food's fiber/sodium/etc. gets silently dropped
     // the moment it's searched, even though it was saved correctly.
-    const cleanDbProducts = dbMatches.map((item) => ({
-      foodName: item.foodName,
-      brand: item.brandName || 'Custom',
-      calories: item.calories,
-      carbs: item.carbs,
-      protein: item.protein,
-      fat: item.fat,
-      servingSize: item.servingSize || 100,
-      unit: item.unit || 'g',
-      isVerified: item.isVerified || false,
-      satFat: item.satFatGoal || 0,
-      polyFat: item.polyFatGoal || 0,
-      monoFat: item.monoFatGoal || 0,
-      transFat: item.transFatGoal || 0,
-      cholesterol: item.cholesterolGoal || 0,
-      sodium: item.sodiumGoal || 0,
-      potassium: item.potassiumGoal || 0,
-      fiber: item.fiberGoal || 0,
-      sugar: item.sugarGoal || 0,
-      vitaminA: item.vitaminAGoal || 0,
-      vitaminC: item.vitaminCGoal || 0,
-      calcium: item.calciumGoal || 0,
-      iron: item.ironGoal || 0,
-      vitaminB12: item.vitaminB12Goal || 0,
-      vitaminD: item.vitaminDGoal || 0,
-    }));
+    //
+    // NOTE: servingSize/amount in the CustomFood schema are stored as
+    // Strings (e.g. "80" or "80g"), not Numbers. We parse the leading
+    // number out so downstream consumers (LogFoodModal/FoodDetailModal)
+    // get a real numeric grams value instead of NaN-ing out to the 100
+    // fallback.
+    const parseGramsFromString = (val) => {
+      if (val === undefined || val === null) return null;
+      const match = String(val).match(/([\d.]+)/);
+      if (match) {
+        const num = Number(match[1]);
+        return isNaN(num) ? null : num;
+      }
+      return null;
+    };
+
+    const cleanDbProducts = dbMatches.map((item) => {
+      const parsedAmount = parseGramsFromString(item.amount) || parseGramsFromString(item.servingSize) || 100;
+
+      return {
+        foodName: item.foodName,
+        brand: item.brandName || 'Custom',
+        calories: item.calories,
+        carbs: item.carbs,
+        protein: item.protein,
+        fat: item.fat,
+        servingSize: parsedAmount,
+        amount: parsedAmount,
+        defaultServingAmount: parsedAmount,
+        unit: item.unit || 'g',
+        isVerified: item.isVerified || false,
+        satFat: item.satFatGoal || 0,
+        polyFat: item.polyFatGoal || 0,
+        monoFat: item.monoFatGoal || 0,
+        transFat: item.transFatGoal || 0,
+        cholesterol: item.cholesterolGoal || 0,
+        sodium: item.sodiumGoal || 0,
+        potassium: item.potassiumGoal || 0,
+        fiber: item.fiberGoal || 0,
+        sugar: item.sugarGoal || 0,
+        vitaminA: item.vitaminAGoal || 0,
+        vitaminC: item.vitaminCGoal || 0,
+        calcium: item.calciumGoal || 0,
+        iron: item.ironGoal || 0,
+        vitaminB12: item.vitaminB12Goal || 0,
+        vitaminD: item.vitaminDGoal || 0,
+      };
+    });
 
     let cleanApiProducts = [];
     try {
@@ -65,6 +87,24 @@ export async function GET(req) {
         const data = await apiRes.json();
         const gToMg = (val) => Math.round((Number(val) || 0) * 1000 * 10) / 10;
         const gToMcg = (val) => Math.round((Number(val) || 0) * 1000000 * 10) / 10;
+
+        // Open Food Facts's *_100g nutriment fields are always defined
+        // "per 100 grams" — that reference basis must stay 100 or the
+        // math breaks. But OFF separately exposes the manufacturer's real
+        // serving size (serving_quantity, or a parseable serving_size
+        // string like "30 g"). We surface that as defaultServingAmount —
+        // a display-only default — without touching the 100g calculation
+        // basis (servingSize/amount stay 100).
+        const parseServingGrams = (product) => {
+          if (product.serving_quantity && !isNaN(product.serving_quantity)) {
+            return Math.round(Number(product.serving_quantity));
+          }
+          if (product.serving_size) {
+            const match = String(product.serving_size).match(/([\d.]+)/);
+            if (match) return Math.round(Number(match[1]));
+          }
+          return null;
+        };
 
         const rawProducts = (data.products || [])
           // Drop junk entries with no usable name or zero everything
@@ -108,8 +148,10 @@ export async function GET(req) {
               protein: Math.round(n['proteins_100g'] || 0),
               fat: Math.round(n['fat_100g'] || 0),
               ...micronutrients,
-              servingSize: 100,
+              servingSize: 100,           // reference basis for the *_100g values — do not change
+              amount: 100,                // reference basis for the *_100g values — do not change
               unit: 'g',
+              defaultServingAmount: parseServingGrams(product) || 100, // real-world serving, display-only
               isVerified: false,
               _completeness: completeness,
               _dedupeKey: `${name.trim().toLowerCase()}|${brand.trim().toLowerCase()}`
