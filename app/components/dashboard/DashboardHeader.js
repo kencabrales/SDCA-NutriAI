@@ -33,12 +33,12 @@ export default function DashboardHeader({ user, calorieGoal, onOpenProfile, onLo
           Welcome back, {user?.firstName || 'User'}!
         </h1>
         
-        <div className="mt-1 flex items-center gap-2">
+        {/* <div className="mt-1 flex items-center gap-2">
           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider border ${goalAnalysis.bgColor} ${goalAnalysis.borderColor} ${goalAnalysis.tagColor}`}>
             <Target className="w-3 h-3" />
             <span>GOAL: {goalAnalysis.mode} ({goalAnalysis.diffText})</span>
           </span>
-        </div>
+        </div> */}
       </div>
       
       <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">

@@ -568,13 +568,13 @@ const getDisplayList = () => {
               {activeCategoryTab === 'my-meals' && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-white rounded-full" />}
             </button>
 
-            <button 
+            {/* <button 
               onClick={() => { setActiveCategoryTab('my-recipes'); setSearchQuery(''); }} 
               className={`py-2.5 relative transition-all ${activeCategoryTab === 'my-recipes' ? 'text-white font-bold' : 'hover:text-gray-200'}`}
             >
               My Recipes
               {activeCategoryTab === 'my-recipes' && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-white rounded-full" />}
-            </button>
+            </button> */}
 
             <button 
               onClick={() => { setActiveCategoryTab('my-foods'); setSearchQuery(''); }} 

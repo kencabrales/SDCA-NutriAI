@@ -1,3 +1,4 @@
+// api/weight-log/route.js
 import { NextResponse } from 'next/server';
 import dbConnect from '@/lib/mongodb';
 import WeightLog from '@/lib/WeightLog';
