@@ -818,7 +818,7 @@ const getDisplayList = () => {
     >
       <div className="flex items-center gap-3 flex-1 min-w-0 pr-3">
         {Icon && (
-          <div className="w-10 h-10 bg-gray-800 rounded-xl flex items-center justify-center border border-gray-700 text-gray-400 flex-shrink-0">
+          <div className="w-10 h-10 bg-gray-800 rounded-xl flex items-center justify-center border border-gray-700 text-gray-400 min-h-0">
             <Icon className="w-4 h-4" />
           </div>
         )}
@@ -830,7 +830,7 @@ const getDisplayList = () => {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 flex-shrink-0">
+      <div className="flex items-center gap-2 min-h-0">
         {isCustomFood && !isMeal && !isRecipe && !isSelectingForMeal && !isSelectingForRecipe && (
           <button
             onClick={(e) => { e.stopPropagation(); onDeleteCustomFood?.(item._id || item.id, name); }}

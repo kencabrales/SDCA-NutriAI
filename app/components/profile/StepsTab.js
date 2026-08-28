@@ -1,6 +1,7 @@
+// components/profile/StepsTab.js
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   ResponsiveContainer, 
   BarChart, 
@@ -13,21 +14,27 @@ import {
 } from 'recharts';
 import { Calendar, Plus, Footprints, X, Loader2 } from 'lucide-react';
 
-// INITIAL DUMMY LOGS
-const MOCK_STEP_DATA = [
-  { _id: '1', dateStr: '8/15', fullDate: 'Friday, August 15, 2026', dayName: 'Friday', steps: 1750, isoDate: '2026-08-15' },
-  { _id: '2', dateStr: '8/16', fullDate: 'Saturday, August 16, 2026', dayName: 'Saturday', steps: 250, isoDate: '2026-08-16' },
-  { _id: '3', dateStr: '8/17', fullDate: 'Sunday, August 17, 2026', dayName: 'Sunday', steps: 2850, isoDate: '2026-08-17' },
-  { _id: '4', dateStr: '8/18', fullDate: 'Monday, August 18, 2026', dayName: 'Monday', steps: 8060, isoDate: '2026-08-18' },
-  { _id: '5', dateStr: '8/19', fullDate: 'Tuesday, August 19, 2026', dayName: 'Tuesday', steps: 5487, isoDate: '2026-08-19' },
-  { _id: '6', dateStr: '8/20', fullDate: 'Wednesday, August 20, 2026', dayName: 'Wednesday', steps: 2648, isoDate: '2026-08-20' },
-  { _id: '7', dateStr: '8/21', fullDate: 'Thursday, August 21, 2026', dayName: 'Thursday', steps: 740, isoDate: '2026-08-21' },
-];
-
 const TARGET_STEP_GOAL = 10000;
 
-export default function StepsTab({ initialData = MOCK_STEP_DATA, goal = TARGET_STEP_GOAL }) {
-  const [data, setData] = useState(initialData);
+// Converts a raw StepLog entry (userId, date: "YYYY-MM-DD", steps) into the
+// display shape this component's chart/list already expect.
+function toDisplayEntry(entry) {
+  const dateObj = new Date(entry.date + 'T00:00:00Z');
+  return {
+    _id: entry._id,
+    isoDate: entry.date,
+    dateStr: `${dateObj.getUTCMonth() + 1}/${dateObj.getUTCDate()}`,
+    fullDate: new Intl.DateTimeFormat('en-US', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC',
+    }).format(dateObj),
+    dayName: new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: 'UTC' }).format(dateObj),
+    steps: entry.steps,
+  };
+}
+
+export default function StepsTab({ user, goal = TARGET_STEP_GOAL }) {
+  const [data, setData] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [timeRange, setTimeRange] = useState('1W');
   const [selectedEntryId, setSelectedEntryId] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -36,6 +43,35 @@ export default function StepsTab({ initialData = MOCK_STEP_DATA, goal = TARGET_S
   // Form State
   const [newSteps, setNewSteps] = useState('');
   const [newDate, setNewDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const userId = user?.id || user?._id;
+
+  const fetchSteps = useCallback(async () => {
+    if (!userId) return;
+    setIsLoading(true);
+    try {
+      const end = new Date();
+      const start = new Date();
+      start.setDate(start.getDate() - 90); // covers the "3M" range in one fetch
+
+      const startStr = start.toISOString().split('T')[0];
+      const endStr = end.toISOString().split('T')[0];
+
+      const res = await fetch(`/api/steps?userId=${userId}&start=${startStr}&end=${endStr}`);
+      if (res.ok) {
+        const result = await res.json();
+        setData((result.entries || []).map(toDisplayEntry));
+      }
+    } catch (err) {
+      console.error('Failed to load step entries:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    fetchSteps();
+  }, [fetchSteps]);
 
   // Filter Data based on selected Range
   const filteredData = useMemo(() => {
@@ -82,37 +118,30 @@ export default function StepsTab({ initialData = MOCK_STEP_DATA, goal = TARGET_S
     return Math.max(goal, Math.ceil((maxSteps + 2000) / 2500) * 2500);
   }, [filteredData, goal]);
 
-  // Handle Add Entry Form Submit
-  const handleAddLog = (e) => {
+  // Handle Add Entry Form Submit — POSTs to the real API (upsert: re-logging
+  // the same date overwrites that day's entry, same as the old mock behavior)
+  const handleAddLog = async (e) => {
     e.preventDefault();
-    if (!newSteps) return;
+    if (!newSteps || !userId) return;
 
     setSubmitting(true);
-    const dateObj = new Date(newDate);
-    
-    const newEntry = {
-      _id: Date.now().toString(),
-      dateStr: `${dateObj.getMonth() + 1}/${dateObj.getDate()}`,
-      fullDate: dateObj.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
-      dayName: dateObj.toLocaleDateString('en-US', { weekday: 'long' }),
-      steps: Number(newSteps),
-      isoDate: newDate,
-    };
+    try {
+      const res = await fetch('/api/steps', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, steps: Number(newSteps), date: newDate }),
+      });
 
-    // Replace if date exists, else append
-    setData((prev) => {
-      const existsIndex = prev.findIndex((item) => item.isoDate === newDate);
-      if (existsIndex > -1) {
-        const updated = [...prev];
-        updated[existsIndex] = newEntry;
-        return updated;
+      if (res.ok) {
+        await fetchSteps();
+        setIsModalOpen(false);
+        setNewSteps('');
       }
-      return [...prev, newEntry];
-    });
-
-    setSubmitting(false);
-    setIsModalOpen(false);
-    setNewSteps('');
+    } catch (err) {
+      console.error('Failed to save step entry:', err);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -139,137 +168,145 @@ export default function StepsTab({ initialData = MOCK_STEP_DATA, goal = TARGET_S
         </div>
       </div>
 
-      {/* METRICS SUMMARY ROW */}
-      <div className="grid grid-cols-3 text-center px-4 py-2 border-b border-gray-800/60">
-        <div>
-          <div className="text-sm sm:text-base font-bold font-mono text-white tracking-tight">
-            {metrics.avg.toLocaleString()}
-          </div>
-          <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">
-            Average
-          </div>
+      {isLoading ? (
+        <div className="py-12 flex items-center justify-center text-gray-500">
+          <Loader2 className="w-5 h-5 animate-spin mr-2" />
+          <span className="text-xs font-mono">Loading steps...</span>
         </div>
+      ) : (
+        <>
+          {/* METRICS SUMMARY ROW */}
+          <div className="grid grid-cols-3 text-center px-4 py-2 border-b border-gray-800/60">
+            <div>
+              <div className="text-sm sm:text-base font-bold font-mono text-white tracking-tight">
+                {metrics.avg.toLocaleString()}
+              </div>
+              <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">
+                Average
+              </div>
+            </div>
 
-        <div>
-          <div className="text-sm sm:text-base font-bold font-mono text-white tracking-tight">
-            {metrics.best.toLocaleString()}
+            <div>
+              <div className="text-sm sm:text-base font-bold font-mono text-white tracking-tight">
+                {metrics.best.toLocaleString()}
+              </div>
+              <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">
+                Best ({metrics.bestDate})
+              </div>
+            </div>
+
+            <div>
+              <div className="text-sm sm:text-base font-bold font-mono text-white tracking-tight">
+                {metrics.total.toLocaleString()}
+              </div>
+              <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">
+                Total
+              </div>
+            </div>
           </div>
-          <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">
-            Best ({metrics.bestDate})
-          </div>
-        </div>
 
-        <div>
-          <div className="text-sm sm:text-base font-bold font-mono text-white tracking-tight">
-            {metrics.total.toLocaleString()}
-          </div>
-          <div className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">
-            Total
-          </div>
-        </div>
-      </div>
-
-      {/* RED BAR GRAPH SECTION */}
-      <div className="px-4 pt-2">
-        <div className="h-48 w-full">
-          {filteredData.length > 0 ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={filteredData} margin={{ top: 15, right: 10, left: -25, bottom: 0 }}>
-                <XAxis 
-                  dataKey="dateStr" 
-                  stroke="#64748b" 
-                  fontSize={10} 
-                  tickLine={false} 
-                  axisLine={{ stroke: '#1e293b' }} 
-                />
-                <YAxis 
-                  stroke="#64748b" 
-                  fontSize={9} 
-                  tickLine={false} 
-                  axisLine={false}
-                  domain={[0, yMax]}
-                />
-                <Tooltip 
-                  cursor={{ fill: '#1e293b', opacity: 0.4 }}
-                  content={({ active, payload }) => {
-                    if (active && payload && payload.length) {
-                      return (
-                        <div className="bg-[#0f172a] border border-gray-700 p-2 rounded-lg text-xs font-mono shadow-lg">
-                          <span className="text-rose-400 font-bold">{payload[0].value.toLocaleString()}</span> steps
-                        </div>
-                      );
-                    }
-                    return null;
-                  }}
-                />
-
-                {/* Step Goal Line */}
-                <ReferenceLine 
-                  y={goal} 
-                  stroke="#9f1239" 
-                  strokeDasharray="3 3" 
-                  label={{ value: 'GOAL', fill: '#f43f5e', fontSize: 9, position: 'insideTopRight' }}
-                />
-
-                <Bar 
-                  dataKey="steps" 
-                  radius={[4, 4, 0, 0]} 
-                  maxBarSize={46}
-                  onClick={(entry) => setSelectedEntryId(entry._id)}
-                  className="cursor-pointer"
-                >
-                  {filteredData.map((entry) => (
-                    <Cell 
-                      key={entry._id || entry.isoDate} 
-                      fill={selectedEntryId === entry._id ? '#fb7185' : '#f43f5e'} 
+          {/* BAR GRAPH SECTION */}
+          <div className="px-4 pt-2">
+            <div className="h-48 w-full">
+              {filteredData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={filteredData} margin={{ top: 15, right: 10, left: -25, bottom: 0 }}>
+                    <XAxis 
+                      dataKey="dateStr" 
+                      stroke="#64748b" 
+                      fontSize={10} 
+                      tickLine={false} 
+                      axisLine={{ stroke: '#1e293b' }} 
                     />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-full flex items-center justify-center text-xs text-gray-500">
-              No step entries recorded for this time period.
+                    <YAxis 
+                      stroke="#64748b" 
+                      fontSize={9} 
+                      tickLine={false} 
+                      axisLine={false}
+                      domain={[0, yMax]}
+                    />
+                    <Tooltip 
+                      cursor={{ fill: '#1e293b', opacity: 0.4 }}
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          return (
+                            <div className="bg-[#0f172a] border border-gray-700 p-2 rounded-lg text-xs font-mono shadow-lg">
+                              <span className="text-rose-400 font-bold">{payload[0].value.toLocaleString()}</span> steps
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+
+                    <ReferenceLine 
+                      y={goal} 
+                      stroke="#9f1239" 
+                      strokeDasharray="3 3" 
+                      label={{ value: 'GOAL', fill: '#f43f5e', fontSize: 9, position: 'insideTopRight' }}
+                    />
+
+                    <Bar 
+                      dataKey="steps" 
+                      radius={[4, 4, 0, 0]} 
+                      maxBarSize={46}
+                      onClick={(entry) => setSelectedEntryId(entry._id)}
+                      className="cursor-pointer"
+                    >
+                      {filteredData.map((entry) => (
+                        <Cell 
+                          key={entry._id || entry.isoDate} 
+                          fill={selectedEntryId === entry._id ? '#fb7185' : '#f43f5e'} 
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center text-xs text-gray-500">
+                  No step entries recorded for this time period.
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      </div>
+          </div>
 
-      {/* ENTRIES LIST HEADER */}
-      <div className="px-5 pt-4 pb-1 border-b border-gray-800/60 flex items-center justify-between">
-        <h3 className="text-xs font-bold text-gray-300 uppercase tracking-wider">Entries</h3>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="p-1 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors"
-          title="Add step entry"
-        >
-          <Plus className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* REVERSE-ORDER DETAILED LOGS */}
-      <div className="divide-y divide-gray-800/50">
-        {[...filteredData].reverse().map((entry) => {
-          const isSelected = selectedEntryId === entry._id;
-          return (
-            <div 
-              key={entry._id || entry.isoDate} 
-              onClick={() => setSelectedEntryId(entry._id)}
-              className={`px-5 py-3.5 flex items-center justify-between transition-colors cursor-pointer ${
-                isSelected ? 'bg-rose-500/10 border-l-2 border-rose-500' : 'hover:bg-[#161F30]'
-              }`}
+          {/* ENTRIES LIST HEADER */}
+          <div className="px-5 pt-4 pb-1 border-b border-gray-800/60 flex items-center justify-between">
+            <h3 className="text-xs font-bold text-gray-300 uppercase tracking-wider">Entries</h3>
+            <button 
+              onClick={() => setIsModalOpen(true)}
+              className="p-1 rounded-lg text-rose-400 hover:bg-rose-500/10 transition-colors"
+              title="Add step entry"
             >
-              <div>
-                <div className="text-xs font-semibold text-gray-200">{entry.fullDate}</div>
-                <div className="text-[11px] text-gray-500">{entry.dayName}</div>
-              </div>
-              <div className={`text-xs font-bold font-mono ${isSelected ? 'text-rose-400' : 'text-gray-100'}`}>
-                {Number(entry.steps).toLocaleString()}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+              <Plus className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* REVERSE-ORDER DETAILED LOGS */}
+          <div className="divide-y divide-gray-800/50">
+            {[...filteredData].reverse().map((entry) => {
+              const isSelected = selectedEntryId === entry._id;
+              return (
+                <div 
+                  key={entry._id || entry.isoDate} 
+                  onClick={() => setSelectedEntryId(entry._id)}
+                  className={`px-5 py-3.5 flex items-center justify-between transition-colors cursor-pointer ${
+                    isSelected ? 'bg-rose-500/10 border-l-2 border-rose-500' : 'hover:bg-[#161F30]'
+                  }`}
+                >
+                  <div>
+                    <div className="text-xs font-semibold text-gray-200">{entry.fullDate}</div>
+                    <div className="text-[11px] text-gray-500">{entry.dayName}</div>
+                  </div>
+                  <div className={`text-xs font-bold font-mono ${isSelected ? 'text-rose-400' : 'text-gray-100'}`}>
+                    {Number(entry.steps).toLocaleString()}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
 
       {/* ADD STEPS MODAL */}
       {isModalOpen && (
@@ -310,7 +347,7 @@ export default function StepsTab({ initialData = MOCK_STEP_DATA, goal = TARGET_S
 
               <button
                 type="submit"
-                disabled={submitting}z
+                disabled={submitting}
                 className="w-full bg-rose-600 hover:bg-rose-500 font-bold py-2.5 rounded-xl text-white transition-all disabled:opacity-50 flex items-center justify-center space-x-2 mt-2"
               >
                 {submitting && <Loader2 className="w-4 h-4 animate-spin" />}

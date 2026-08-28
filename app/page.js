@@ -19,8 +19,7 @@ export default function Home() {
       {/* Navbar */}
       <header className="max-w-7xl w-full mx-auto px-6 py-6 flex justify-between items-center">
         <div className="flex items-center space-x-2">
-          <span className="text-[#00A86B] text-xl font-bold tracking-tight">logo</span>
-          <span className="text-xl font-bold tracking-tight text-white">NutriAI</span>
+         <span className="text-xl font-bold tracking-tight text-white">NutriAI</span>
         </div>
       </header>
 
@@ -58,17 +57,14 @@ export default function Home() {
         {/* Feature Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full text-left max-w-5xl mt-4">
           <div className="bg-[#121A2A] border border-gray-900 rounded-2xl p-6">
-            <div className="w-10 h-10 bg-[#1A2333] rounded-xl flex items-center justify-center mb-4 text-[#00A86B] text-lg">🌐</div>
             <h3 className="font-bold text-lg text-white mb-2">IoT Enabled</h3>
             <p className="text-gray-400 text-sm">Connects directly to Bluetooth scales for real-time precision weighing.</p>
           </div>
           <div className="bg-[#121A2A] border border-gray-900 rounded-2xl p-6">
-            <div className="w-10 h-10 bg-[#1A2333] rounded-xl flex items-center justify-center mb-4 text-purple-400 text-lg">🧠</div>
             <h3 className="font-bold text-lg text-white mb-2">AI Powered</h3>
             <p className="text-gray-400 text-sm">AI Nutritionist calculates macros and gives personalized health advice.</p>
           </div>
           <div className="bg-[#121A2A] border border-gray-900 rounded-2xl p-6">
-            <div className="w-10 h-10 bg-[#1A2333] rounded-xl flex items-center justify-center mb-4 text-emerald-400 text-lg">⚖️</div>
             <h3 className="font-bold text-lg text-white mb-2">Smart Tracking</h3>
             <p className="text-gray-400 text-sm">Offline-capable PWA that syncs your progress when back online.</p>
           </div>

@@ -88,14 +88,7 @@ if (!isOpen) return null;
       bgColor: 'bg-indigo-500/10',
       action: () => setActiveTab('weight'),
     },
-    {
-      id: 'steps',
-      label: 'Steps',
-      icon: Footprints,
-      color: 'text-rose-400',
-      bgColor: 'bg-rose-500/10',
-      action: () => setActiveTab('steps'),
-    },
+    
     {
       id: 'nutrition',
       label: 'Nutrition',
@@ -104,14 +97,14 @@ if (!isOpen) return null;
       bgColor: 'bg-cyan-500/10',
       action: () => setActiveTab('nutrition'),
     },
-    {
-      id: 'my-meals',
-      label: 'My Meals, Recipes & Foods',
-      icon: Utensils,
-      color: 'text-orange-400',
-      bgColor: 'bg-orange-500/10',
-      action: () => setActiveTab('meals'),
-    },
+    // {
+    //   id: 'my-meals',
+    //   label: 'My Meals, Recipes & Foods',
+    //   icon: Utensils,
+    //   color: 'text-orange-400',
+    //   bgColor: 'bg-orange-500/10',
+    //   action: () => setActiveTab('meals'),
+    // },
     {
       id: 'reminders',
       label: 'Reminders',

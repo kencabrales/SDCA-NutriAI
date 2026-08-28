@@ -262,7 +262,7 @@ export default function HabitsAndWeight({
         </div>
 
 
-        {/* Steps Metric Item */}
+        {/* Steps Metric Item
         <div className="group flex items-center justify-between p-2 rounded-xl bg-[#0B121F]/60 border border-gray-800/50 hover:border-emerald-500/30 transition-all">
           <div className="flex items-center gap-2.5">
             <div className="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
@@ -274,7 +274,7 @@ export default function HabitsAndWeight({
             </div>
           </div>
           <ChevronRight className="w-3.5 h-3.5 text-gray-600 group-hover:text-emerald-400 transition-colors" />
-        </div>
+        </div> */}
 
       </div>
 

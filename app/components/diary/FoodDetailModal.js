@@ -4,6 +4,18 @@ import { useState, useEffect, useMemo } from 'react';
 import { X, Cpu, Activity, ChevronDown, ChevronUp } from 'lucide-react';
 
 export default function FoodDetailModal({ isOpen, foodName, mealType, initialData, onClose, onConfirmLog, onUpdateLog }) {
+const GRAMS_PER_UNIT = {
+  g: 1,
+  kg: 1000,
+  oz: 28.34952,
+  lb: 453.59237,
+  ml: 1,
+  l: 1000,
+  'fl oz': 29.5735,
+  cup: 240,
+  tbsp: 15,
+  tsp: 5,
+};
   const [servings, setServings] = useState(1);
   const [unit, setUnit] = useState('g');
   const [showNutritionFacts, setShowNutritionFacts] = useState(false);
@@ -12,6 +24,7 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
   const [weightInGrams, setWeightInGrams] = useState(100);
   // The visual value shown in the input box
   const [inputValue, setInputValue] = useState(100);
+  
 
   // Detect data source type
   const isEditing = initialData && (initialData._id || initialData.id) && !initialData.caloriesPer100g && !initialData.items && initialData.totalCalories === undefined;
@@ -32,20 +45,9 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
         setInputValue(initAmount);
         setUnit(initUnit);
         setServings(1);
-        
-        if (initUnit === 'oz') {
-          setWeightInGrams(initAmount * 28.34952);
-        } else {
-          setWeightInGrams(initAmount);
-        }
+        const factor = GRAMS_PER_UNIT[initUnit] ?? 1;
+        setWeightInGrams(initAmount * factor);
       } else {
-        // Plain search-result / normalizeItem-shaped data (custom foods and
-        // API foods alike). `amount` here is the nutrition-math reference
-        // (e.g. 100 for Open Food Facts' per-100g values, or the food's true
-        // serving for custom foods). `defaultServingAmount` is the food's
-        // real-world serving size, used purely to pre-fill what the user
-        // sees — it does NOT change how the nutrition math is scaled below,
-        // since that still reads `initialData.amount` as the reference.
         const defaultAmount = Number(
           initialData?.defaultServingAmount || initialData?.amount || initialData?.servingAmount || 100
         );
@@ -58,36 +60,32 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
   }, [initialData, isOpen, isEditing, isMeal]);
 
   // Handle Input Changes directly
-  const handleInputChange = (e) => {
-    const rawValue = e.target.value;
-    setInputValue(rawValue);
-    
-    const numVal = parseFloat(rawValue) || 0;
-    if (unit === 'oz') {
-      setWeightInGrams(numVal * 28.34952);
-    } else {
-      setWeightInGrams(numVal);
-    }
-  };
+const handleInputChange = (e) => {
+  const rawValue = e.target.value;
+  setInputValue(rawValue);
+
+  const numVal = parseFloat(rawValue) || 0;
+  const factor = GRAMS_PER_UNIT[unit] ?? 1;
+  setWeightInGrams(numVal * factor);
+};
 
   // Handle Unit Switching by deriving strictly from the exact grams
-  const handleUnitChange = (newUnit) => {
-    if (newUnit === unit) return;
-    
-    setUnit(newUnit);
-    if (newUnit === 'oz') {
-      // Round Ounces to max 1 decimal place (e.g., 3.5)
-      setInputValue(Number((weightInGrams / 28.34952).toFixed(1)));
-    } else {
-      // Round Grams/ml to whole numbers (no doubles)
-      setInputValue(Math.round(weightInGrams));
-    }
-  };
+const handleUnitChange = (newUnit) => {
+  if (newUnit === unit) return;
 
-  // --- NUTRITIONAL MATHEMATICS ENGINE (Memoized for zero lag) ---
-  // Scales ALL 15 tracked nutrients (not just the 4 macros + 4 micros this
-  // used to stop at) so nothing gets silently dropped between "how much did
-  // you actually log" and what reaches /api/food-log.
+  setUnit(newUnit);
+  const factor = GRAMS_PER_UNIT[newUnit] ?? 1;
+  const converted = weightInGrams / factor;
+
+  if (newUnit === 'g' || newUnit === 'ml') {
+    setInputValue(Math.round(converted));           // whole units for the finest-grained options
+  } else if (newUnit === 'kg' || newUnit === 'l') {
+    setInputValue(Number(converted.toFixed(3)));     // kg/l need more decimal precision
+  } else {
+    setInputValue(Number(converted.toFixed(1)));     // oz, lb, fl oz, cup, tbsp, tsp
+  }
+};
+
   const {
     baseCalories, baseCarbs, baseProtein, baseFat,
     baseSodium, baseSugar, baseFiber, baseCholesterol,
@@ -126,13 +124,11 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
       vitaminB12 = round1((initialData?.totalVitaminB12 || 0) * currentServings);
       vitaminD = round1((initialData?.totalVitaminD || 0) * currentServings);
     } else if (isEditing) {
-      // Editing an existing FoodLog entry — its fields are the plain names
-      // FoodLog's schema uses (item.sodium, item.potassium, ...).
-      const originalGrams = (initialData?.unit === 'oz') 
-        ? (initialData.amount * 28.34952) 
-        : (initialData?.amount || 100);
+  const initUnit = initialData?.unit || 'g';
+  const factor = GRAMS_PER_UNIT[initUnit] ?? 1;
+  const originalGrams = (initialData?.amount || 100) * factor;
 
-      const per = (field) => (initialData?.[field] || 0) / originalGrams;
+  const per = (field) => (initialData?.[field] || 0) / originalGrams;
 
       cal = Math.round(dynamicGrams * per('calories'));
       carbs = round1(dynamicGrams * per('carbs'));
@@ -322,15 +318,15 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
                     className="bg-[#1C2638] border border-gray-800 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-[#00A86B]"
                   >
                     <option value="g">Grams (g)</option>
-                    <option value="kg">Kilograms (kg)</option>
                     <option value="oz">Ounces (oz)</option>
-                    <option value="lb">Pounds (lb)</option>
                     <option value="ml">Milliliters (ml)</option>
-                    <option value="l">Liters (l)</option>
-                    <option value="fl oz">Fluid Ounces (fl oz)</option>
                     <option value="cup">Cups</option>
                     <option value="tbsp">Tablespoons (tbsp)</option>
                     <option value="tsp">Teaspoons (tsp)</option>
+                   <option value="fl oz">Fluid Ounces (fl oz)</option>
+                    <option value="l">Liters (l)</option>
+                    <option value="kg">Kilograms (kg)</option>
+                    <option value="lb">Pounds (lb)</option>
                     <option value="serving">Servings</option>
                   </select>
                 </div>
