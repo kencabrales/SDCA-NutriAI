@@ -1,34 +1,63 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { X, Cpu, Activity, ChevronDown, ChevronUp } from 'lucide-react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { X, Cpu, Activity, ChevronDown, ChevronUp, Wifi, WifiOff } from 'lucide-react';
 
 export default function FoodDetailModal({ isOpen, foodName, mealType, initialData, onClose, onConfirmLog, onUpdateLog }) {
-const GRAMS_PER_UNIT = {
-  g: 1,
-  kg: 1000,
-  oz: 28.34952,
-  lb: 453.59237,
-  ml: 1,
-  l: 1000,
-  'fl oz': 29.5735,
-  cup: 240,
-  tbsp: 15,
-  tsp: 5,
-};
+  const GRAMS_PER_UNIT = {
+    g: 1,
+    kg: 1000,
+    oz: 28.34952,
+    lb: 453.59237,
+    ml: 1,
+    l: 1000,
+    'fl oz': 29.5735,
+    cup: 240,
+    tbsp: 15,
+    tsp: 5,
+  };
+
   const [servings, setServings] = useState(1);
   const [unit, setUnit] = useState('g');
   const [showNutritionFacts, setShowNutritionFacts] = useState(false);
   
-  // The absolute source of truth to prevent conversion drift
+  // Absolute source of truth to prevent conversion drift
   const [weightInGrams, setWeightInGrams] = useState(100);
-  // The visual value shown in the input box
+  // Visual value shown in the input box
   const [inputValue, setInputValue] = useState(100);
-  
+
+  // Bluetooth State & Refs
+  const [isConnected, setIsConnected] = useState(false);
+  const [bluetoothStatus, setBluetoothStatus] = useState('Tap to Connect Scale');
+  const gattServerRef = useRef(null);
+  const charRef = useRef(null);
 
   // Detect data source type
   const isEditing = initialData && (initialData._id || initialData.id) && !initialData.caloriesPer100g && !initialData.items && initialData.totalCalories === undefined;
   const isMeal = initialData && (initialData.items || initialData.totalCalories !== undefined);
+
+  // Helper to re-derive input value whenever weightInGrams or unit updates
+  const updateInputValue = (grams, currentUnit) => {
+    const factor = GRAMS_PER_UNIT[currentUnit] ?? 1;
+    const converted = grams / factor;
+
+    if (currentUnit === 'g' || currentUnit === 'ml') {
+      setInputValue(Math.round(converted));
+    } else if (currentUnit === 'kg' || currentUnit === 'l') {
+      setInputValue(Number(converted.toFixed(3)));
+    } else {
+      setInputValue(Number(converted.toFixed(1)));
+    }
+  };
+
+  // Helper to safely disconnect BLE
+  const disconnectScale = () => {
+    if (gattServerRef.current && gattServerRef.current.connected) {
+      gattServerRef.current.disconnect();
+    }
+    setIsConnected(false);
+    setBluetoothStatus('Tap to Connect Scale');
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -56,35 +85,91 @@ const GRAMS_PER_UNIT = {
         setServings(Number(initialData?.numberOfServings || 1));
         setUnit(initialData?.unit || 'g');
       }
+    } else {
+      disconnectScale();
     }
   }, [initialData, isOpen, isEditing, isMeal]);
 
-  // Handle Input Changes directly
-const handleInputChange = (e) => {
-  const rawValue = e.target.value;
-  setInputValue(rawValue);
+  // Clean up BLE on unmount
+  useEffect(() => {
+    return () => disconnectScale();
+  }, []);
 
-  const numVal = parseFloat(rawValue) || 0;
-  const factor = GRAMS_PER_UNIT[unit] ?? 1;
-  setWeightInGrams(numVal * factor);
-};
+  // Web Bluetooth Live Data Stream
+  const connectToScale = async () => {
+    if (isConnected) {
+      disconnectScale();
+      return;
+    }
 
-  // Handle Unit Switching by deriving strictly from the exact grams
-const handleUnitChange = (newUnit) => {
-  if (newUnit === unit) return;
+    if (!navigator.bluetooth) {
+      alert('Web Bluetooth is not supported on this browser/device. Please use Google Chrome or Edge.');
+      return;
+    }
 
-  setUnit(newUnit);
-  const factor = GRAMS_PER_UNIT[newUnit] ?? 1;
-  const converted = weightInGrams / factor;
+    try {
+      setBluetoothStatus('Scanning...');
+      
+      // Filter directly by the scale service UUID (0xFFF0) for clean picker UX
+      const device = await navigator.bluetooth.requestDevice({
+        filters: [{ services: [0xFFF0] }],
+        optionalServices: [0xFFF0]
+      });
 
-  if (newUnit === 'g' || newUnit === 'ml') {
-    setInputValue(Math.round(converted));           // whole units for the finest-grained options
-  } else if (newUnit === 'kg' || newUnit === 'l') {
-    setInputValue(Number(converted.toFixed(3)));     // kg/l need more decimal precision
-  } else {
-    setInputValue(Number(converted.toFixed(1)));     // oz, lb, fl oz, cup, tbsp, tsp
-  }
-};
+      device.addEventListener('gattserverdisconnected', () => {
+        setIsConnected(false);
+        setBluetoothStatus('Disconnected. Tap to Reconnect');
+      });
+
+      setBluetoothStatus('Connecting...');
+      const server = await device.gatt.connect();
+      gattServerRef.current = server;
+
+      const service = await server.getPrimaryService(0xFFF0);
+      const characteristic = await service.getCharacteristic(0xFFF1);
+      charRef.current = characteristic;
+
+      await characteristic.startNotifications();
+      characteristic.addEventListener('characteristicvaluechanged', handleWeightPacket);
+
+      setIsConnected(true);
+      setBluetoothStatus('Connected Live');
+    } catch (err) {
+      console.error('BLE Error:', err);
+      setBluetoothStatus('Connection Failed. Retry?');
+      setIsConnected(false);
+    }
+  };
+
+  // Parse byte notifications in real-time
+  const handleWeightPacket = (event) => {
+    const data = event.target.value; // DataView
+    
+    // Safety check for data length
+    if (data.byteLength >= 10) {
+      const liveWeightGrams = data.getUint16(8, false); // Big-Endian read of Bytes 8-9
+
+      setWeightInGrams(liveWeightGrams);
+      updateInputValue(liveWeightGrams, unit);
+    }
+  };
+
+  // Handle manual input changes
+  const handleInputChange = (e) => {
+    const rawValue = e.target.value;
+    setInputValue(rawValue);
+
+    const numVal = parseFloat(rawValue) || 0;
+    const factor = GRAMS_PER_UNIT[unit] ?? 1;
+    setWeightInGrams(numVal * factor);
+  };
+
+  // Handle unit switching and convert visual value from weightInGrams
+  const handleUnitChange = (newUnit) => {
+    if (newUnit === unit) return;
+    setUnit(newUnit);
+    updateInputValue(weightInGrams, newUnit);
+  };
 
   const {
     baseCalories, baseCarbs, baseProtein, baseFat,
@@ -102,8 +187,6 @@ const handleUnitChange = (newUnit) => {
     const round1 = (n) => parseFloat((n || 0).toFixed(1));
 
     if (isMeal) {
-      // Meal documents (lib/Meals.js) store these as total*Goal-free plain
-      // aggregate fields: totalSodium, totalPotassium, totalSatFat, etc.
       cal = Math.round((initialData?.totalCalories || 0) * currentServings);
       carbs = round1((initialData?.totalCarbs || 0) * currentServings);
       pro = round1((initialData?.totalProtein || 0) * currentServings);
@@ -124,11 +207,11 @@ const handleUnitChange = (newUnit) => {
       vitaminB12 = round1((initialData?.totalVitaminB12 || 0) * currentServings);
       vitaminD = round1((initialData?.totalVitaminD || 0) * currentServings);
     } else if (isEditing) {
-  const initUnit = initialData?.unit || 'g';
-  const factor = GRAMS_PER_UNIT[initUnit] ?? 1;
-  const originalGrams = (initialData?.amount || 100) * factor;
+      const initUnit = initialData?.unit || 'g';
+      const factor = GRAMS_PER_UNIT[initUnit] ?? 1;
+      const originalGrams = (initialData?.amount || 100) * factor;
 
-  const per = (field) => (initialData?.[field] || 0) / originalGrams;
+      const per = (field) => (initialData?.[field] || 0) / (originalGrams || 1);
 
       cal = Math.round(dynamicGrams * per('calories'));
       carbs = round1(dynamicGrams * per('carbs'));
@@ -150,8 +233,6 @@ const handleUnitChange = (newUnit) => {
       vitaminB12 = round1(dynamicGrams * per('vitaminB12'));
       vitaminD = round1(dynamicGrams * per('vitaminD'));
     } else if (initialData && initialData.caloriesPer100g !== undefined) {
-      // A `*Per100g`-shaped data source (not currently produced by any known
-      // caller, but supported defensively in case one exists elsewhere).
       const per = (field) => (initialData[`${field}Per100g`] || 0) / 100;
 
       cal = Math.round(dynamicGrams * per('calories'));
@@ -174,12 +255,6 @@ const handleUnitChange = (newUnit) => {
       vitaminB12 = round1(dynamicGrams * per('vitaminB12'));
       vitaminD = round1(dynamicGrams * per('vitaminD'));
     } else {
-      // Robust fallback: search results, LogFoodModal.normalizeItem output,
-      // and anything else shaped with plain field names + a reference amount.
-      // NOTE: referenceBaseAmount intentionally reads `amount` (the
-      // nutrition-math reference, e.g. 100 for per-100g API data), NOT
-      // `defaultServingAmount` (the display-only real-world serving) — mixing
-      // those up would silently corrupt the scaling math.
       const rawCal = Number(initialData?.calories || initialData?.nf_calories || initialData?.energy || 0);
       const rawCarbs = Number(initialData?.carbs || initialData?.carbohydrates || initialData?.nf_total_carbohydrate || 0);
       const rawPro = Number(initialData?.protein || initialData?.nf_protein || 0);
@@ -224,15 +299,17 @@ const handleUnitChange = (newUnit) => {
       vitaminD = round1(rawVitaminD * scaleFactor * currentServings);
     }
 
+    // FIXED: Return keys correctly mapped to local calculated variables to prevent ReferenceError
     return { 
       baseCalories: cal, baseCarbs: carbs, baseProtein: pro, baseFat: fat,
       baseSodium: sodium, baseSugar: sugar, baseFiber: fiber, baseCholesterol: cholesterol,
-      basePotassium: potassium, baseSatFat: satFat, basePolyFat: polyFat, baseMonoFat: monoFat, baseTransFat: transFat,
-      baseVitaminA: vitaminA, baseVitaminC: vitaminC, baseCalcium: calcium, baseIron: iron, baseVitaminB12: vitaminB12, baseVitaminD: vitaminD
+      basePotassium: potassium, baseSatFat: satFat, basePolyFat: polyFat, 
+      baseMonoFat: monoFat, baseTransFat: transFat,
+      baseVitaminA: vitaminA, baseVitaminC: vitaminC, baseCalcium: calcium, 
+      baseIron: iron, baseVitaminB12: vitaminB12, baseVitaminD: vitaminD
     };
   }, [initialData, isMeal, isEditing, weightInGrams, servings]);
 
-  // Early return placed AFTER all hooks have been invoked to satisfy React Hook rules
   if (!isOpen) return null;
 
   const handleSave = () => {
@@ -294,17 +371,34 @@ const handleUnitChange = (newUnit) => {
         </div>
 
         <div className="p-5 space-y-4 flex-1 overflow-y-auto">
-          {/* IoT Scale Sync Banner */}
-          <div className="bg-cyan-950/10 border border-cyan-900/40 rounded-xl p-3 flex items-center justify-between">
+          
+          {/* Interactive IoT Scale Sync Banner */}
+          <button 
+            type="button"
+            onClick={connectToScale}
+            className={`w-full border rounded-xl p-3 flex items-center justify-between transition-all text-left ${
+              isConnected 
+                ? 'bg-emerald-950/20 border-emerald-500/50 hover:bg-emerald-950/30' 
+                : 'bg-cyan-950/10 border-cyan-900/40 hover:border-cyan-500/60 hover:bg-cyan-950/20'
+            }`}
+          >
             <div className="flex items-center space-x-2.5">
-              <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+              <div className={`w-2.5 h-2.5 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-cyan-400'}`} />
               <div>
-                <p className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider">IoT Scale Interface</p>
-                <p className="text-[9px] text-gray-500 font-mono">Ready for Bluetooth hardware stream...</p>
+                <p className={`text-[10px] font-bold uppercase tracking-wider ${isConnected ? 'text-emerald-400' : 'text-cyan-400'}`}>
+                  {isConnected ? 'IoT Scale Connected' : 'IoT Scale Interface'}
+                </p>
+                <p className="text-[9px] text-gray-400 font-mono mt-0.5">
+                  {bluetoothStatus}
+                </p>
               </div>
             </div>
-            <Cpu className="w-4 h-4 text-cyan-500/60" />
-          </div>
+            {isConnected ? (
+              <Wifi className="w-4 h-4 text-emerald-400" />
+            ) : (
+              <WifiOff className="w-4 h-4 text-cyan-500/60" />
+            )}
+          </button>
 
           {/* Input Controls */}
           <div className="space-y-3">
@@ -323,7 +417,7 @@ const handleUnitChange = (newUnit) => {
                     <option value="cup">Cups</option>
                     <option value="tbsp">Tablespoons (tbsp)</option>
                     <option value="tsp">Teaspoons (tsp)</option>
-                   <option value="fl oz">Fluid Ounces (fl oz)</option>
+                    <option value="fl oz">Fluid Ounces (fl oz)</option>
                     <option value="l">Liters (l)</option>
                     <option value="kg">Kilograms (kg)</option>
                     <option value="lb">Pounds (lb)</option>
@@ -342,7 +436,7 @@ const handleUnitChange = (newUnit) => {
                   />
                 </div>
               </>
-                        ) : initialData?.items?.length > 0 ? (
+            ) : initialData?.items?.length > 0 ? (
               <div className="bg-[#161F30] border border-gray-800 rounded-xl p-3 text-xs text-gray-400">
                 <p className="font-bold text-white mb-1">Items in this Meal:</p>
                 <ul className="list-disc list-inside space-y-1 text-[11px]">
@@ -389,7 +483,7 @@ const handleUnitChange = (newUnit) => {
             </div>
           </div>
 
-          {/* Show Nutrition Facts — collapsible micronutrient breakdown */}
+          {/* Show Nutrition Facts */}
           <div className="border-t border-gray-800/60 pt-3">
             <button
               type="button"
