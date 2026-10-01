@@ -150,7 +150,7 @@ export default function Dashboard() {
           router={router}
         />
 
-        <IoTScaleBridge status="Offline" />
+        <IoTScaleBridge />
 
         <ProfileSettingsModal 
           isOpen={isProfileModalOpen}

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Cpu, Activity, ChevronDown, ChevronUp, Wifi, WifiOff } from 'lucide-react';
+import { useBluetoothScale } from '../BluetoothScaleContext';
 
 export default function FoodDetailModal({ isOpen, foodName, mealType, initialData, onClose, onConfirmLog, onUpdateLog }) {
   const GRAMS_PER_UNIT = {
@@ -20,17 +21,14 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
   const [servings, setServings] = useState(1);
   const [unit, setUnit] = useState('g');
   const [showNutritionFacts, setShowNutritionFacts] = useState(false);
-  
+
   // Absolute source of truth to prevent conversion drift
   const [weightInGrams, setWeightInGrams] = useState(100);
   // Visual value shown in the input box
   const [inputValue, setInputValue] = useState(100);
 
-  // Bluetooth State & Refs
-  const [isConnected, setIsConnected] = useState(false);
-  const [bluetoothStatus, setBluetoothStatus] = useState('Tap to Connect Scale');
-  const gattServerRef = useRef(null);
-  const charRef = useRef(null);
+  // Shared scale connection (lives above this modal, so it survives open/close)
+  const { isConnected, status: bluetoothStatus, liveWeightGrams, connect, disconnect } = useBluetoothScale();
 
   // Detect data source type
   const isEditing = initialData && (initialData._id || initialData.id) && !initialData.caloriesPer100g && !initialData.items && initialData.totalCalories === undefined;
@@ -50,15 +48,6 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
     }
   };
 
-  // Helper to safely disconnect BLE
-  const disconnectScale = () => {
-    if (gattServerRef.current && gattServerRef.current.connected) {
-      gattServerRef.current.disconnect();
-    }
-    setIsConnected(false);
-    setBluetoothStatus('Tap to Connect Scale');
-  };
-
   useEffect(() => {
     if (isOpen) {
       setShowNutritionFacts(false);
@@ -70,89 +59,48 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
       } else if (isEditing) {
         const initAmount = initialData.amount || 100;
         const initUnit = initialData.unit || 'g';
-        
+
         setInputValue(initAmount);
         setUnit(initUnit);
         setServings(1);
         const factor = GRAMS_PER_UNIT[initUnit] ?? 1;
         setWeightInGrams(initAmount * factor);
-      } else {
+            } else {
         const defaultAmount = Number(
           initialData?.defaultServingAmount || initialData?.amount || initialData?.servingAmount || 100
         );
-        setWeightInGrams(defaultAmount);
+        const defaultUnit = initialData?.unit || 'g';
+        const defaultFactor = GRAMS_PER_UNIT[defaultUnit] ?? 1;
+        setWeightInGrams(defaultAmount * defaultFactor);
         setInputValue(defaultAmount);
-        setServings(Number(initialData?.numberOfServings || 1));
-        setUnit(initialData?.unit || 'g');
+        setServings(1);
+        setUnit(defaultUnit);
       }
-    } else {
-      disconnectScale();
     }
   }, [initialData, isOpen, isEditing, isMeal]);
 
-  // Clean up BLE on unmount
+  // Readings below this are scale noise/drift (an empty scale rarely sends a clean 0)
+  const NOISE_FLOOR_GRAMS = 10;
+
+  // When the modal opens, remember whatever the scale currently reads so it
+  // doesn't instantly overwrite the food's default amount. Only readings that
+  // CHANGE after opening get applied.
+  const lastLiveRef = useRef(null);
   useEffect(() => {
-    return () => disconnectScale();
-  }, []);
+    if (isOpen) lastLiveRef.current = liveWeightGrams;
+  }, [isOpen, initialData]);
 
-  // Web Bluetooth Live Data Stream
-  const connectToScale = async () => {
-    if (isConnected) {
-      disconnectScale();
-      return;
-    }
+  // Apply live scale readings while connected (skips meals and edits of saved entries)
+  useEffect(() => {
+    if (!isOpen || isMeal || isEditing || !isConnected) return;
+    if (liveWeightGrams === null) return;
+    if (liveWeightGrams === lastLiveRef.current) return;
+    lastLiveRef.current = liveWeightGrams;
 
-    if (!navigator.bluetooth) {
-      alert('Web Bluetooth is not supported on this browser/device. Please use Google Chrome or Edge.');
-      return;
-    }
-
-    try {
-      setBluetoothStatus('Scanning...');
-      
-      // Filter directly by the scale service UUID (0xFFF0) for clean picker UX
-      const device = await navigator.bluetooth.requestDevice({
-        filters: [{ services: [0xFFF0] }],
-        optionalServices: [0xFFF0]
-      });
-
-      device.addEventListener('gattserverdisconnected', () => {
-        setIsConnected(false);
-        setBluetoothStatus('Disconnected. Tap to Reconnect');
-      });
-
-      setBluetoothStatus('Connecting...');
-      const server = await device.gatt.connect();
-      gattServerRef.current = server;
-
-      const service = await server.getPrimaryService(0xFFF0);
-      const characteristic = await service.getCharacteristic(0xFFF1);
-      charRef.current = characteristic;
-
-      await characteristic.startNotifications();
-      characteristic.addEventListener('characteristicvaluechanged', handleWeightPacket);
-
-      setIsConnected(true);
-      setBluetoothStatus('Connected Live');
-    } catch (err) {
-      console.error('BLE Error:', err);
-      setBluetoothStatus('Connection Failed. Retry?');
-      setIsConnected(false);
-    }
-  };
-
-  // Parse byte notifications in real-time
-  const handleWeightPacket = (event) => {
-    const data = event.target.value; // DataView
-    
-    // Safety check for data length
-    if (data.byteLength >= 10) {
-      const liveWeightGrams = data.getUint16(8, false); // Big-Endian read of Bytes 8-9
-
-      setWeightInGrams(liveWeightGrams);
-      updateInputValue(liveWeightGrams, unit);
-    }
-  };
+    const cleaned = liveWeightGrams < NOISE_FLOOR_GRAMS ? 0 : liveWeightGrams;
+    setWeightInGrams(cleaned);
+    updateInputValue(cleaned, unit);
+  }, [liveWeightGrams, isConnected, isOpen, isMeal, isEditing, unit]);
 
   // Handle manual input changes
   const handleInputChange = (e) => {
@@ -276,30 +224,30 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
       const rawVitaminD = Number(initialData?.vitaminD || 0);
       
       const referenceBaseAmount = Number(initialData?.amount || initialData?.servingAmount || 100);
-      const scaleFactor = referenceBaseAmount > 0 ? dynamicGrams / referenceBaseAmount : 1;
+      const referenceBaseGrams = referenceBaseAmount * (GRAMS_PER_UNIT[initialData?.unit || 'g'] ?? 1);
+      const scaleFactor = referenceBaseGrams > 0 ? dynamicGrams / referenceBaseGrams : 1;
 
-      cal = Math.round(rawCal * scaleFactor * currentServings);
-      carbs = round1(rawCarbs * scaleFactor * currentServings);
-      pro = round1(rawPro * scaleFactor * currentServings);
-      fat = round1(rawFat * scaleFactor * currentServings);
-      sodium = round1(rawSodium * scaleFactor * currentServings);
-      sugar = round1(rawSugar * scaleFactor * currentServings);
-      fiber = round1(rawFiber * scaleFactor * currentServings);
-      cholesterol = round1(rawChol * scaleFactor * currentServings);
-      potassium = round1(rawPotassium * scaleFactor * currentServings);
-      satFat = round1(rawSatFat * scaleFactor * currentServings);
-      polyFat = round1(rawPolyFat * scaleFactor * currentServings);
-      monoFat = round1(rawMonoFat * scaleFactor * currentServings);
-      transFat = round1(rawTransFat * scaleFactor * currentServings);
-      vitaminA = round1(rawVitaminA * scaleFactor * currentServings);
-      vitaminC = round1(rawVitaminC * scaleFactor * currentServings);
-      calcium = round1(rawCalcium * scaleFactor * currentServings);
-      iron = round1(rawIron * scaleFactor * currentServings);
-      vitaminB12 = round1(rawVitaminB12 * scaleFactor * currentServings);
-      vitaminD = round1(rawVitaminD * scaleFactor * currentServings);
+      cal = Math.round(rawCal * scaleFactor);
+      carbs = round1(rawCarbs * scaleFactor);
+      pro = round1(rawPro * scaleFactor);
+      fat = round1(rawFat * scaleFactor);
+      sodium = round1(rawSodium * scaleFactor);
+      sugar = round1(rawSugar * scaleFactor);
+      fiber = round1(rawFiber * scaleFactor);
+      cholesterol = round1(rawChol * scaleFactor);
+      potassium = round1(rawPotassium * scaleFactor);
+      satFat = round1(rawSatFat * scaleFactor);
+      polyFat = round1(rawPolyFat * scaleFactor);
+      monoFat = round1(rawMonoFat * scaleFactor);
+      transFat = round1(rawTransFat * scaleFactor);
+      vitaminA = round1(rawVitaminA * scaleFactor);
+      vitaminC = round1(rawVitaminC * scaleFactor);
+      calcium = round1(rawCalcium * scaleFactor);
+      iron = round1(rawIron * scaleFactor);
+      vitaminB12 = round1(rawVitaminB12 * scaleFactor);
+      vitaminD = round1(rawVitaminD * scaleFactor);
     }
 
-    // FIXED: Return keys correctly mapped to local calculated variables to prevent ReferenceError
     return { 
       baseCalories: cal, baseCarbs: carbs, baseProtein: pro, baseFat: fat,
       baseSodium: sodium, baseSugar: sugar, baseFiber: fiber, baseCholesterol: cholesterol,
@@ -375,7 +323,7 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
           {/* Interactive IoT Scale Sync Banner */}
           <button 
             type="button"
-            onClick={connectToScale}
+            onClick={isConnected ? disconnect : connect}
             className={`w-full border rounded-xl p-3 flex items-center justify-between transition-all text-left ${
               isConnected 
                 ? 'bg-emerald-950/20 border-emerald-500/50 hover:bg-emerald-950/30' 
@@ -457,7 +405,7 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
                 type="number" 
                 step="0.1"
                 value={servings} 
-                onChange={(e) => setServings(e.target.value === '' ? '' : Math.max(0.1, parseFloat(e.target.value) || 1))}
+                onChange={(e) => setServings(e.target.value)}
                 className="w-24 text-right bg-[#1C2638] border border-gray-800 rounded-lg px-2 py-1 text-xs text-white font-mono focus:outline-none focus:border-[#00A86B] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
             </div>
