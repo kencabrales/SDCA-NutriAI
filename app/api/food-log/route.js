@@ -96,6 +96,10 @@ export async function POST(request) {
 
     // --- BATCH INSERTION ---
     if (items && Array.isArray(items) && items.length > 0) {
+      const invalidItem = items.find((item) => !item.foodName && !item.name ||
+        ![item.amount, item.calories, item.protein, item.carbs, item.fat].every((value) => value !== undefined && value !== null && value !== '' && Number.isFinite(Number(value))) ||
+        Number(item.amount) <= 0 || ['calories','protein','carbs','fat'].some((field) => Number(item[field]) < 0));
+      if (invalidItem) return NextResponse.json({ error: 'Every food entry must include a name, serving amount, and valid calories and macro values.' }, { status: 400 });
       const targetedDateString = body.date || body.logDate || new Date().toISOString().split('T')[0];
 
             const logsToInsert = items.map((item) => {
@@ -149,8 +153,10 @@ export async function POST(request) {
     const unit = body.unit || 'g';
     const numericAmount = parseFloat(body.amount) || 100;
 
-    if (!foodName || !targetedDateString) {
-      return NextResponse.json({ error: 'Missing required fields: foodName and date are required' }, { status: 400 });
+    if (!foodName || !targetedDateString ||
+        ![body.amount, body.calories, body.protein, body.carbs, body.fat].every((value) => value !== undefined && value !== null && value !== '' && Number.isFinite(Number(value))) ||
+        Number(body.amount) <= 0 || ['calories','protein','carbs','fat'].some((field) => Number(body[field]) < 0)) {
+      return NextResponse.json({ error: 'Food name, date, serving amount, calories, protein, carbs, and fat are required and must be valid numbers' }, { status: 400 });
     }
 
     const weightGrams = getStoredAmount(numericAmount, unit);
@@ -161,15 +167,15 @@ export async function POST(request) {
 
     const protein = (body.protein !== undefined && body.protein !== null && body.protein !== '') 
       ? parseFloat(parseFloat(body.protein).toFixed(1)) 
-      : parseFloat((weightGrams * 0.12).toFixed(1));
+      : 0;
 
     const carbs = (body.carbs !== undefined && body.carbs !== null && body.carbs !== '') 
       ? parseFloat(parseFloat(body.carbs).toFixed(1)) 
-      : parseFloat((weightGrams * 0.18).toFixed(1));
+      : 0;
 
     const fat = (body.fat !== undefined && body.fat !== null && body.fat !== '') 
       ? parseFloat(parseFloat(body.fat).toFixed(1)) 
-      : parseFloat((weightGrams * 0.03).toFixed(1));
+      : 0;
 
         const newLog = await FoodLog.create({
       userId,
