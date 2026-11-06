@@ -22,7 +22,7 @@ const MICRO_FIELDS = [
   { label: 'Vitamin D (%)', name: 'vitaminD' },
 ];
 
-const UNITS = ['g', 'ml', 'cup', 'tbsp', 'tsp', 'oz', 'serving', 'pcs', 'slice', 'packet', 'scoop'];
+const UNITS = ['g', 'ml', 'pcs', 'serving'];
 
 const INITIAL_FORM = {
   brandName: '',
