@@ -162,12 +162,7 @@ useEffect(() => {
 
 if (res.ok) {
   fetchDailyLogs(user.id || user._id, currentDate);
-  // Only refresh the AI suggestion if the log we just added actually
-  // belongs to today — logging a food entry to a past date shouldn't
-  // touch today's suggestion at all.
-  if (currentDate === getTodayPH()) {
-    fetchMealSuggestion(user.id || user._id, true);
-  }
+  // Logging food does not trigger another AI request; keep the daily insight cached.
   const userRes = await fetch(`/api/user/profile?userId=${user.id || user._id}`);
         if (userRes.ok) {
           const updatedUserData = await userRes.json();
