@@ -108,6 +108,9 @@ export default function AnalyticsDashboard() {
   const [chartData, setChartData] = useState([]);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [aiSummary, setAiSummary] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiNotice, setAiNotice] = useState('');
   const router = useRouter();
   
   const dateInputRef = useRef(null);
@@ -127,101 +130,60 @@ export default function AnalyticsDashboard() {
   const fetchAnalytics = useCallback(async (userId, baseDate, days) => {
     setLoading(true);
     try {
-      const dateSequence = generateDateRange(baseDate, days);
-      const lastRangeDate = dateSequence[dateSequence.length - 1];
-      
-      const res = await fetch(`/api/analytics?userId=${userId}&days=${days}&startDate=${baseDate}&endDate=${lastRangeDate}`);
-      if (!res.ok) throw new Error('Network analytics framework retrieval crash');
-      
+      const startDate = baseDate;
+      const end = new Date(startDate + 'T00:00:00Z');
+      end.setUTCDate(end.getUTCDate() + days - 1);
+      const endDate = end.toISOString().slice(0, 10);
+      const res = await fetch(`/api/nutrition-analytics?userId=${encodeURIComponent(userId)}&start=${startDate}&end=${endDate}`);
+      if (!res.ok) throw new Error('Unable to load nutrition analytics.');
       const resData = await res.json();
-      const rawLogs = resData.data || resData.logs || [];
-
-      const processedDays = dateSequence.map(dateStr => {
-        const dailyItems = rawLogs.filter(item => {
-          const logItemDate = (item.date || item.logDate || '');
-          return logItemDate.split('T')[0] === dateStr;
-        });
-        
-        const dayMap = {
-          date: dateStr,
-          displayDay: new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short' }),
-          displayNum: dateStr.split('-')[2],
-          calories: 0,
-          breakfast: 0,
-          lunch: 0,
-          dinner: 0,
-          snacks: 0,
-          protein: 0,
-          carbs: 0,
-          fat: 0,
-          water: 0
-        };
-
-        dailyItems.forEach(item => {
-          if (item.type === 'water' || item.waterVolume) {
-            dayMap.water += Math.round(item.waterVolume || item.amount || 0);
-            return;
-          }
-
-          const mType = (item.mealType || 'snacks').toLowerCase().trim();
-          const kcals = Math.round(item.calories || 0);
-          dayMap.calories += kcals;
-          dayMap.protein += item.protein || 0;
-          dayMap.carbs += item.carbs || 0;
-          dayMap.fat += item.fat || 0;
-          if (item.water) dayMap.water += Math.round(item.water);
-
-          if (mType === 'breakfast') dayMap.breakfast += kcals;
-          else if (mType === 'lunch') dayMap.lunch += kcals;
-          else if (mType === 'dinner') dayMap.dinner += kcals;
-          else dayMap.snacks += kcals;
-        });
-
-        return dayMap;
-      });
-
-      const totalCalories = processedDays.reduce((s, d) => s + d.calories, 0);
-      const totalBreakfast = processedDays.reduce((s, d) => s + d.breakfast, 0);
-      const totalLunch = processedDays.reduce((s, d) => s + d.lunch, 0);
-      const totalDinner = processedDays.reduce((s, d) => s + d.dinner, 0);
-      const totalSnacks = processedDays.reduce((s, d) => s + d.snacks, 0);
-      const totalProtein = processedDays.reduce((s, d) => s + d.protein, 0);
-      const totalCarbs = processedDays.reduce((s, d) => s + d.carbs, 0);
-      const totalFat = processedDays.reduce((s, d) => s + d.fat, 0);
-      const totalWater = processedDays.reduce((s, d) => s + d.water, 0);
-
+      const sourceDays = Array.isArray(resData.analyticsData) ? resData.analyticsData : [];
+      const processedDays = sourceDays.map((item) => ({
+        date: item.fullDate,
+        displayDay: item.day,
+        displayNum: item.date,
+        calories: Number(item.calories) || 0,
+        breakfast: Number(item.breakfast) || 0,
+        lunch: Number(item.lunch) || 0,
+        dinner: Number(item.dinner) || 0,
+        snacks: Number(item.snack) || 0,
+        protein: Number(item.protein) || 0,
+        carbs: Number(item.carbs) || 0,
+        fat: Number(item.fat) || 0,
+        water: 0,
+      }));
+      const totals = processedDays.reduce((acc, day) => {
+        ['calories','breakfast','lunch','dinner','snacks','protein','carbs','fat','water'].forEach((key) => { acc[key] += day[key]; });
+        return acc;
+      }, { calories:0, breakfast:0, lunch:0, dinner:0, snacks:0, protein:0, carbs:0, fat:0, water:0 });
       const count = processedDays.length || 1;
-
-      setChartData([
-        ...processedDays,
-        {
-          date: 'avg',
-          displayDay: 'Avg',
-          displayNum: '',
-          calories: Math.round(totalCalories / count),
-          breakfast: Math.round(totalBreakfast / count),
-          lunch: Math.round(totalLunch / count),
-          dinner: Math.round(totalDinner / count),
-          snacks: Math.round(totalSnacks / count),
-          protein: Math.round(totalProtein / count),
-          carbs: Math.round(totalCarbs / count),
-          fat: Math.round(totalFat / count),
-          water: Math.round(totalWater / count),
-          totalPeriodCalories: totalCalories,
-          totalPeriodProtein: totalProtein,
-          totalPeriodCarbs: totalCarbs,
-          totalPeriodFat: totalFat,
-          totalPeriodWater: totalWater,
-          isAvgColumn: true
-        }
-      ]);
-
+      setChartData([...processedDays, {
+        date:'avg', displayDay:'Avg', displayNum:'',
+        calories:Math.round(totals.calories/count),
+        breakfast:Math.round(totals.breakfast/count),
+        lunch:Math.round(totals.lunch/count),
+        dinner:Math.round(totals.dinner/count),
+        snacks:Math.round(totals.snacks/count),
+        protein:Math.round(totals.protein/count),
+        carbs:Math.round(totals.carbs/count),
+        fat:Math.round(totals.fat/count),
+        water:0,
+        totalPeriodCalories:totals.calories,
+        totalPeriodProtein:totals.protein,
+        totalPeriodCarbs:totals.carbs,
+        totalPeriodFat:totals.fat,
+        totalPeriodWater:0,
+        isAvgColumn:true
+      }]);
+      setAiSummary('');
+      setAiNotice('');
     } catch (err) {
-      console.error("Data ingestion failure:", err);
+      console.error('Analytics loading error:', err);
+      setChartData([]);
     } finally {
       setLoading(false);
     }
-  }, [generateDateRange]);
+  }, []);
 
   useEffect(() => {
     const session = localStorage.getItem('user');
@@ -256,6 +218,34 @@ export default function AnalyticsDashboard() {
     if (isNaN(val) || val < 1) return;
     setTimeframe(val);
     if (user && anchorDate) fetchAnalytics(user.id, anchorDate, val);
+  };
+
+  const analyzeCurrentPeriod = async () => {
+    if (!user?.id || !anchorDate) return;
+    const days = chartData.filter((item) => !item.isAvgColumn);
+    if (!days.length) {
+      setAiNotice('There is no nutrition data available for this period yet.');
+      return;
+    }
+    setAiLoading(true);
+    setAiNotice('');
+    try {
+      const endDate = days[days.length - 1].date;
+      const periodLabel = timeframe === 1 ? 'daily' : timeframe <= 7 ? 'weekly' : 'monthly';
+      const params = new URLSearchParams({
+        userId: user.id, start: anchorDate, end: endDate, periodLabel,
+      });
+      const response = await fetch(`/api/ai/nutrition-summary?${params.toString()}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || 'AI analysis is temporarily unavailable.');
+      setAiSummary(data.nutritionSummary || '');
+      setAiNotice(data.cached ? 'Showing a saved analysis to conserve Gemini usage.' : (data.message || ''));
+      if (!data.nutritionSummary && data.message) setAiNotice(data.message);
+    } catch (error) {
+      setAiNotice(error.message || 'AI analysis is unavailable. Your nutrition charts are still working.');
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   const openCalendarPicker = () => {
@@ -388,6 +378,25 @@ export default function AnalyticsDashboard() {
             <p className="text-[10px] text-gray-500 mt-1">Tracked consumption volume</p>
           </div>
         </div>
+
+        <section className="bg-gradient-to-br from-[#142438] to-[#121A2A] border border-cyan-900/50 rounded-2xl p-5 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 text-cyan-300">
+                <Sparkles className="w-4 h-4" />
+                <h3 className="text-xs font-bold uppercase tracking-widest">NutriAI Period Analysis</h3>
+              </div>
+              <p className="text-xs text-gray-400 mt-1">Optional AI feedback based on the foods logged in this selected period.</p>
+            </div>
+            <button onClick={analyzeCurrentPeriod} disabled={aiLoading || loading}
+              className="rounded-xl bg-cyan-500/15 border border-cyan-400/30 px-4 py-2 text-xs font-bold text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-50 transition-colors">
+              {aiLoading ? 'Analyzing...' : 'Analyze this period'}
+            </button>
+          </div>
+          {aiSummary ? <p className="text-sm text-gray-200 leading-relaxed">{aiSummary}</p> : <p className="text-xs text-gray-500">Select Analyze this period when you want personalized feedback. Cached results help reduce free Gemini usage.</p>}
+          {aiNotice && <p className="text-[11px] text-gray-400">{aiNotice}</p>}
+          <p className="text-[10px] text-gray-600">AI feedback is informational and does not replace professional nutrition or medical advice.</p>
+        </section>
 
         {/* GRAPH 1: STACKED CALORIE MEAL ANALYSIS */}
         <div className="bg-[#121A2A] border border-gray-800 rounded-2xl p-4">
