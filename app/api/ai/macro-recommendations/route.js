@@ -28,7 +28,7 @@ export async function GET(req) {
         userId,
         $or: [{ logDate: requestedDate }, { date: requestedDate }],
       }).lean(),
-      Recipe.find({}).limit(30).lean(),
+      Recipe.find({ $or: [{ userId: String(userId) }, { privacy: 'Public' }] }).limit(30).lean(),
     ]);
 
     const total = (field) => todayLogs.reduce((sum, log) => sum + (Number(log[field]) || 0), 0);
