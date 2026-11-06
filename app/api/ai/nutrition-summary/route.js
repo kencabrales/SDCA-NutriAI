@@ -4,9 +4,10 @@ import dbConnect from '@/lib/mongodb';
 import FoodLog from '@/lib/FoodLog';
 import User from '@/lib/User';
 import AIInsight from '@/lib/AIInsight';
+import AIUsageEvent from '@/lib/AIUsageEvent';
 import { generateJSON } from '@/lib/aiClient';
 import { recordAIUsage } from '@/lib/recordAIUsage';
-import { dateStringToUTCAnchor, utcAnchorToDateString, addDaysUTC, getWeekdayLabel } from '@/lib/dateUtils';
+import { dateStringToUTCAnchor, utcAnchorToDateString, addDaysUTC, getTodayPH } from '@/lib/dateUtils';
 
 const CACHE_FRESH_MS = 24 * 60 * 60 * 1000; // a range's summary is valid for a full day once generated
 const GENERATION_TIMEOUT_MS = 8000;
@@ -98,6 +99,24 @@ export async function GET(req) {
       await recordAIUsage({ userId, feature: 'nutrition-summary-cache', status: 'cached' });
       return NextResponse.json({ nutritionSummary: cached.nutritionSummary, cached: true });
     }
+    const analysisDayStart = new Date(`${getTodayPH()}T00:00:00+08:00`);
+    const todayAnalyses = await AIUsageEvent.countDocuments({
+      userId,
+      feature: 'nutrition-summary',
+      status: { $in: ['success', 'failed', 'quota'] },
+      createdAt: { $gte: analysisDayStart },
+    });
+    if (!forceRefresh && todayAnalyses >= 3) {
+      return NextResponse.json({
+        nutritionSummary: cached?.nutritionSummary || null,
+        cached: Boolean(cached),
+        stale: Boolean(cached),
+        message: cached
+          ? 'Daily AI analysis limit reached. Showing the last saved analysis.'
+          : 'You have reached the daily AI analysis limit. Your charts and food tracking remain available.',
+      }, { status: cached ? 200 : 429 });
+    }
+
     const daysWithData = dailyTotals.filter((d) => d.calories > 0);
 
     if (daysWithData.length === 0) {
