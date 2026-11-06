@@ -81,13 +81,12 @@ const fetchDailyLogs = useCallback(async (userId, dateStr) => {
 // every click. `forceRefresh` should only be true when a food log actually
 // changed for today; a plain page load/refresh leaves it false so the
 // backend serves its cached result instead of spending another AI call.
-const fetchMealSuggestion = useCallback(async (userId, forceRefresh = false) => {
+const fetchMealSuggestion = useCallback(async (userId) => {
   if (!userId) return;
   setIsLoadingSuggestion(true);
   try {
     const todayStr = getTodayPH();
-    const refreshParam = forceRefresh ? '&refresh=true' : '';
-    const res = await fetch(`/api/ai/insights?userId=${userId}&date=${todayStr}${refreshParam}`);
+    const res = await fetch(`/api/ai/insights?userId=${userId}&date=${todayStr}`);
     if (res.ok) {
       const data = await res.json();
       setMealSuggestion(data.mealSuggestion || null);
@@ -163,12 +162,7 @@ useEffect(() => {
 
 if (res.ok) {
   fetchDailyLogs(user.id || user._id, currentDate);
-  // Only refresh the AI suggestion if the log we just added actually
-  // belongs to today — logging a food entry to a past date shouldn't
-  // touch today's suggestion at all.
-  if (currentDate === getTodayPH()) {
-    fetchMealSuggestion(user.id || user._id, true);
-  }
+  // Logging food does not trigger another AI request; keep the daily insight cached.
   const userRes = await fetch(`/api/user/profile?userId=${user.id || user._id}`);
         if (userRes.ok) {
           const updatedUserData = await userRes.json();
@@ -200,9 +194,7 @@ if (res.ok) {
       });
       if (res.ok) {
         fetchDailyLogs(user.id || user._id, currentDate);
-        if (currentDate === getTodayPH()) {
-          fetchMealSuggestion(user.id || user._id, true);
-        }
+        // Keep the daily insight stable; editing a log does not trigger another AI call.
         showToastNotification('Log Updated', 'Your entry was updated successfully.', 'success');
       } else {
         showToastNotification('Error Updating', 'Failed to update entry.', 'error');
@@ -230,9 +222,7 @@ if (res.ok) {
       const res = await fetch(`/api/food-log/${logId}`, { method: 'DELETE' });
       if (res.ok) {
         fetchDailyLogs(user.id || user._id, currentDate);
-        if (currentDate === getTodayPH()) {
-          fetchMealSuggestion(user.id || user._id, true);
-        }
+        // Keep the daily insight stable; deleting a log does not trigger another AI call.
         
         const userRes = await fetch(`/api/user/profile?userId=${user.id || user._id}`);
         if (userRes.ok) {
@@ -426,9 +416,7 @@ if (res.ok) {
             selectedDate={currentDate}
             onLogSuccess={async () => {
               await fetchDailyLogs(user.id || user._id, currentDate);
-              if (currentDate === getTodayPH()) {
-                await fetchMealSuggestion(user.id || user._id, true);
-              }
+
             }}
           />
         )}
