@@ -7,6 +7,7 @@ import Recipe from '@/lib/Recipe';
 import AIMealRecommendation from '@/lib/AIMealRecommendation';
 import AIMealUsage from '@/lib/AIMealUsage';
 import { generateJSON } from '@/lib/aiClient';
+import { recordAIUsage } from '@/lib/recordAIUsage';
 import { getTodayPH } from '@/lib/dateUtils';
 
 const DAILY_GENERATION_LIMIT = 3;
@@ -127,6 +128,7 @@ export async function POST(req) {
 
     const cached = await AIMealRecommendation.findOne({ userId, date: requestedDate, mealType, fingerprint }).lean();
     if (cached && Date.now() - new Date(cached.generatedAt).getTime() < CACHE_TTL_MS) {
+      await recordAIUsage({ userId, feature: 'meal-recommendations-cache', status: 'cached' });
       const usage = await AIMealUsage.findOne({ userId, date: usageDate }).lean();
       return NextResponse.json({
         success: true, cached: true, targets: cached.targets, consumed: cached.consumed,
@@ -154,7 +156,7 @@ Remaining targets: ${JSON.stringify(deficit)}
 Foods logged: ${JSON.stringify(foodHistory)}
 Possible saved recipes (per serving): ${JSON.stringify(recipes)}`;
 
-    const ai = await generateJSON(prompt, { retries: 0 });
+    const ai = await generateJSON(prompt, { retries: 0, userId, feature: 'meal-recommendations' });
     const suggestions = Array.isArray(ai.suggestions)
       ? ai.suggestions.filter((item) => item && typeof item.name === 'string').slice(0, 3).map((item) => ({
           name: item.name.trim(),
