@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createHash } from 'node:crypto';
 import dbConnect from '@/lib/mongodb';
 import FoodLog from '@/lib/FoodLog';
 import User from '@/lib/User';
@@ -85,17 +86,18 @@ export async function GET(req) {
     const cached = await AIInsight.findOne({ userId, rangeKey }).lean();
     const cacheAgeMs = cached ? Date.now() - new Date(cached.generatedAt).getTime() : Infinity;
 
-    if (cached && !forceRefresh && cacheAgeMs < CACHE_FRESH_MS) {
-      await recordAIUsage({ userId, feature: 'nutrition-summary-cache', status: 'cached' });
-      return NextResponse.json({ nutritionSummary: cached.nutritionSummary, cached: true });
-    }
-
     const user = await User.findById(userId).lean();
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
     const dailyTotals = await buildRangeSummary(userId, start, end);
+    const summaryFingerprint = createHash('sha256').update(JSON.stringify(dailyTotals)).digest('hex');
+
+    if (cached && !forceRefresh && cacheAgeMs < CACHE_FRESH_MS && cached.summaryFingerprint === summaryFingerprint) {
+      await recordAIUsage({ userId, feature: 'nutrition-summary-cache', status: 'cached' });
+      return NextResponse.json({ nutritionSummary: cached.nutritionSummary, cached: true });
+    }
     const daysWithData = dailyTotals.filter((d) => d.calories > 0);
 
     if (daysWithData.length === 0) {
@@ -133,6 +135,7 @@ Remember: return ONLY the JSON object.`;
           rangeStart: start,
           rangeEnd: end,
           nutritionSummary: aiResult.nutritionSummary || null,
+          summaryFingerprint,
           generatedAt: new Date(),
           stale: false,
         },
