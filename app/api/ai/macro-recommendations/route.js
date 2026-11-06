@@ -76,6 +76,7 @@ export async function POST(req) {
     const body = await req.json();
     const userId = body.userId;
     const requestedDate = body.date || getTodayPH();
+    const usageDate = getTodayPH();
     const mealType = String(body.mealType || '').toLowerCase();
 
     if (!userId || !/^[a-f\d]{24}$/i.test(String(userId))) {
@@ -126,7 +127,7 @@ export async function POST(req) {
 
     const cached = await AIMealRecommendation.findOne({ userId, date: requestedDate, mealType, fingerprint }).lean();
     if (cached && Date.now() - new Date(cached.generatedAt).getTime() < CACHE_TTL_MS) {
-      const usage = await AIMealUsage.findOne({ userId, date: requestedDate }).lean();
+      const usage = await AIMealUsage.findOne({ userId, date: usageDate }).lean();
       return NextResponse.json({
         success: true, cached: true, targets: cached.targets, consumed: cached.consumed,
         deficit: cached.deficit, suggestions: cached.suggestions,
@@ -134,7 +135,7 @@ export async function POST(req) {
       });
     }
 
-    const reservation = await reserveGeneration(userId, requestedDate);
+    const reservation = await reserveGeneration(userId, usageDate);
     if (!reservation.allowed) {
       return NextResponse.json({ success: false, error: reservation.error, usage: reservation.usage }, {
         status: reservation.status,
