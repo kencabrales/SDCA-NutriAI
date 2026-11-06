@@ -490,7 +490,7 @@ export default function NutritionTab({ user }) {
               <div>
                 <h3 className="text-sm font-semibold text-white">Nutrition Analysis</h3>
                 <p className="mt-1 text-xs leading-relaxed text-slate-400">
-                  Get an optional summary of your ${period} food log, calorie intake, and macros.
+                  Get an optional summary of your {period} food log, calorie intake, and macros.
                 </p>
               </div>
               <button
