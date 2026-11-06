@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { getTodayPH } from '@/lib/dateUtils';
 import { ArrowLeft, LayoutDashboard, BarChart3, TrendingUp, AlertTriangle, CheckCircle, ChevronLeft, ChevronRight, Calendar, Sliders, Droplet } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 
@@ -114,18 +115,12 @@ export default function AnalyticsDashboard() {
   const router = useRouter();
   
   const dateInputRef = useRef(null);
-  const targets = { calories: 2339, protein: 175, carbs: 234, fat: 78 };
-
-  const generateDateRange = useCallback((startDateStr, daysCount) => {
-    const dates = [];
-    const start = new Date(startDateStr);
-    for (let i = 0; i < daysCount; i++) {
-      const d = new Date(start);
-      d.setDate(start.getDate() + i);
-      dates.push(d.toISOString().split('T')[0]);
-    }
-    return dates;
-  }, []);
+  const targets = {
+    calories: Number(user?.targetCalories) || 2000,
+    protein: Number(user?.targetProtein || user?.proteinGrams) || 0,
+    carbs: Number(user?.targetCarbs || user?.carbsGrams) || 0,
+    fat: Number(user?.targetFat || user?.fatGrams) || 0,
+  };
 
   const fetchAnalytics = useCallback(async (userId, baseDate, days) => {
     setLoading(true);
@@ -192,7 +187,7 @@ export default function AnalyticsDashboard() {
     const parsedUser = JSON.parse(session);
     setUser(parsedUser);
     
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getTodayPH();
     setAnchorDate(todayStr);
     
     fetchAnalytics(parsedUser.id, todayStr, timeframe);
@@ -324,6 +319,7 @@ export default function AnalyticsDashboard() {
           {/* Control Presets */}
           <div className="flex flex-wrap items-center justify-center gap-3">
             <div className="flex bg-[#0B121F] p-1 rounded-xl border border-gray-800">
+              <button onClick={() => setTimeframe(1)} className={`px-3 py-1.5 text-[10px] uppercase font-black tracking-wider rounded-lg transition-all ${timeframe === 1 ? 'bg-[#00A86B] text-white' : 'text-gray-400 hover:text-white'}`}>Daily View</button>
               <button onClick={() => setTimeframe(7)} className={`px-3 py-1.5 text-[10px] uppercase font-black tracking-wider rounded-lg transition-all ${timeframe === 7 ? 'bg-[#00A86B] text-white' : 'text-gray-400 hover:text-white'}`}>Weekly View</button>
               <button onClick={() => setTimeframe(30)} className={`px-3 py-1.5 text-[10px] uppercase font-black tracking-wider rounded-lg transition-all ${timeframe === 30 ? 'bg-[#00A86B] text-white' : 'text-gray-400 hover:text-white'}`}>Monthly View</button>
             </div>
