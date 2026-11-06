@@ -105,6 +105,9 @@ export default function NutritionTab({ user }) {
   const [analyticsData, setAnalyticsData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [aiSummary, setAiSummary] = useState('');
+  const [aiNotice, setAiNotice] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
 
   const userGoals = useMemo(() => deriveUserGoals(user), [user]);
 
@@ -343,6 +346,44 @@ export default function NutritionTab({ user }) {
     };
   }, [analyticsData, userGoals]);
 
+  const analyzeCurrentPeriod = async () => {
+    if (!userId || !totals.hasAnyData) {
+      setAiNotice('Log some meals in this period before requesting an AI analysis.');
+      return;
+    }
+
+    setAiLoading(true);
+    setAiNotice('');
+    setAiSummary('');
+    try {
+      const params = new URLSearchParams({
+        userId: String(userId),
+        start: rangeStart,
+        end: rangeEnd,
+        periodLabel: period,
+      });
+      const response = await fetch(`/api/ai/nutrition-summary?${params.toString()}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || data.error || 'AI analysis is temporarily unavailable.');
+      setAiSummary(data.nutritionSummary || '');
+      setAiNotice(data.cached
+        ? 'Showing a saved analysis to conserve free AI usage.'
+        : (data.message || ''));
+      if (!data.nutritionSummary && !data.message) {
+        setAiNotice('There is not enough logged food data for an analysis yet.');
+      }
+    } catch (err) {
+      setAiNotice(err.message || 'AI analysis is unavailable right now. Your nutrition reports still work.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    setAiSummary('');
+    setAiNotice('');
+  }, [period, rangeOffset]);
+
   const mealDistributionData = useMemo(() => {
     return chartData.map((d) => ({
       day: d.day,
@@ -453,6 +494,58 @@ export default function NutritionTab({ user }) {
               No meals logged for this {period === 'weekly' ? 'week' : period === 'monthly' ? 'month' : 'year'} yet — your trends will appear here once you start logging.
             </div>
           )}
+
+          <section className="rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-[#112638] to-[#121824] p-4 sm:p-5 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-cyan-300 text-xs font-bold uppercase tracking-wider">
+                  <span>✦</span>
+                  <h3>NutriAI Period Analysis</h3>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Get an optional summary of your {period} food log, calorie intake, and macros.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={analyzeCurrentPeriod}
+                disabled={aiLoading || loading || !totals.hasAnyData}
+                className="shrink-0 rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2.5 text-xs font-bold text-cyan-200 hover:bg-cyan-400/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {aiLoading ? 'Analyzing…' : 'Analyze this period'}
+              </button>
+            </div>
+            {aiSummary ? (
+              <p className="text-sm leading-relaxed text-slate-200">{aiSummary}</p>
+            ) : (
+              <p className="text-xs text-slate-500">
+                AI is optional. Your food diary, charts, and nutrition reports remain available even when AI usage is limited.
+              </p>
+            )}
+            {aiNotice && <p className="text-[11px] text-slate-400">{aiNotice}</p>}
+            <p className="text-[10px] text-slate-600">Informational guidance only; not a substitute for professional nutrition advice.</p>
+          </section>
+
+          <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="rounded-2xl border border-slate-800 bg-[#121824] p-4">
+              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Logging consistency</p>
+              <p className="mt-1 text-xl font-bold text-white">{analyticsData.filter((day) => Number(day.calories) > 0).length}
+                <span className="ml-1 text-xs font-medium text-slate-500">/ {analyticsData.length} days tracked</span>
+              </p>
+              <p className="mt-1 text-[11px] text-slate-400">
+                {analyticsData.length ? Math.round((analyticsData.filter((day) => Number(day.calories) > 0).length / analyticsData.length) * 100) : 0}% of days have food entries
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-800 bg-[#121824] p-4">
+              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Protein goal average</p>
+              <p className="mt-1 text-xl font-bold text-white">{totals.avgProtein}g
+                <span className="ml-1 text-xs font-medium text-slate-500">/ {userGoals.protein}g per day</span>
+              </p>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
+                <div className="h-full rounded-full bg-emerald-400" style={{ width: `${Math.min(100, userGoals.protein > 0 ? (totals.avgProtein / userGoals.protein) * 100 : 0)}%` }} />
+              </div>
+            </div>
+          </section>
 
           {/* TAB 1: ENERGY INTAKE */}
           {activeTab === 'calories' && (
