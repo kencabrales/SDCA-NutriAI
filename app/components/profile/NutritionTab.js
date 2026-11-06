@@ -445,19 +445,6 @@ export default function NutritionTab({ user }) {
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   };
-  const exportReport = () => {
-    if (!analyticsData.length || !totals.hasAnyData) return;
-    const columns = [['Date','fullDate'],['Calories (kcal)','calories'],['Protein (g)','protein'],['Carbs (g)','carbs'],['Fat (g)','fat'],['Fiber (g)','fiber'],['Sugar (g)','sugar'],['Potassium (mg)','potassium'],['Sodium (mg)','sodium'],['Saturated Fat (g)','satFat'],['Trans Fat (g)','transFat'],['Cholesterol (mg)','cholesterol'],['Vitamin A (mcg)','vitaminA'],['Vitamin C (mg)','vitaminC'],['Calcium (mg)','calcium'],['Iron (mg)','iron'],['Vitamin B12 (mcg)','vitaminB12'],['Vitamin D (mcg)','vitaminD']];
-    const quote = (value) => '"' + String(value ?? '').replace(/"/g, '""') + '"';
-    const rows = [columns.map(([label]) => quote(label)).join(','), ...analyticsData.map((day) => columns.map(([, key]) => quote(day[key] ?? 0)).join(','))];
-    const blob = new Blob(['\uFEFF', rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'nutriai-' + period + '-' + rangeStart + '-to-' + rangeEnd + '.csv';
-    document.body.appendChild(link); link.click(); link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  };
   useEffect(() => {
     setAiSummary('');
     setAiNotice('');
