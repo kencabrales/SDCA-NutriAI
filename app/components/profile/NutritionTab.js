@@ -3,9 +3,9 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { 
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Legend
+  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, ReferenceLine
 } from 'recharts';
-import { ChevronLeft, ChevronRight, Loader2, Droplet, Layers, ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, Droplet, ChevronDown, ChevronUp, Download, RefreshCw, Sparkles, Target, TrendingUp, CalendarDays } from 'lucide-react';
 import {
   getPHDateParts,
   dateStringToUTCAnchor,
@@ -108,6 +108,7 @@ export default function NutritionTab({ user }) {
   const [aiSummary, setAiSummary] = useState('');
   const [aiNotice, setAiNotice] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const userGoals = useMemo(() => deriveUserGoals(user), [user]);
 
@@ -191,7 +192,7 @@ export default function NutritionTab({ user }) {
       });
 
     return () => { cancelled = true; };
-  }, [userId, rangeStart, rangeEnd]);
+  }, [userId, rangeStart, rangeEnd, refreshKey]);
 
   const chartData = useMemo(() => {
     if (!analyticsData.length) return [];
@@ -237,29 +238,29 @@ export default function NutritionTab({ user }) {
     });
   }, [analyticsData, period, rangeStart]);
 
-  // Best-effort water average over the viewed range — water isn't stored in
-  // the database anywhere in this app yet (only per-day localStorage on the
-  // dashboard), so this only reflects days logged on THIS browser/device.
-  const avgWaterMl = useMemo(() => {
-    if (typeof window === 'undefined') return 0;
+  // Water logs are currently saved in this browser's localStorage, not in FoodLog.
+  // Average only recorded days; an unrecorded day is unknown, not zero water.
+  const waterStats = useMemo(() => {
+    if (typeof window === 'undefined') return { average: 0, daysWithData: 0, totalDays: 0 };
     let total = 0;
     let daysWithData = 0;
-    let totalDaysInRange = 0;
+    let totalDays = 0;
     let cursor = dateStringToUTCAnchor(rangeStart);
     const endAnchor = dateStringToUTCAnchor(rangeEnd);
     while (cursor.getTime() <= endAnchor.getTime()) {
-      totalDaysInRange++;
+      totalDays++;
       const key = utcAnchorToDateString(cursor);
-      const val = localStorage.getItem(`water_${key}`);
-      if (val !== null) {
-        total += parseInt(val, 10) || 0;
+      const value = localStorage.getItem('water_' + key);
+      if (value !== null && value !== '') {
+        total += Math.max(0, Number.parseInt(value, 10) || 0);
         daysWithData++;
       }
       cursor = addDaysUTC(cursor, 1);
     }
-    return totalDaysInRange > 0 ? Math.round(total / totalDaysInRange) : 0;
-  }, [rangeStart, rangeEnd, analyticsData]);
+    return { average: daysWithData ? Math.round(total / daysWithData) : 0, daysWithData, totalDays };
+  }, [rangeStart, rangeEnd, refreshKey]);
 
+  const avgWaterMl = waterStats.average;
   const totals = useMemo(() => {
     const count = analyticsData.length || 1;
     const sum = (key) => analyticsData.reduce((a, b) => a + (b[key] || 0), 0);
@@ -278,6 +279,13 @@ export default function NutritionTab({ user }) {
     const avgCarbs = Math.round(sumCarbs / count);
     const avgFat = Math.round(sumFat / count);
     const avgProtein = Math.round(sumProtein / count);
+
+    const loggedDays = analyticsData.filter((day) => Number(day.calories) > 0);
+    const loggedDayCount = loggedDays.length;
+    const averageOnLoggedDays = (key) => loggedDayCount ? Math.round(loggedDays.reduce((total, day) => total + (Number(day[key]) || 0), 0) / loggedDayCount) : 0;
+    const avgLoggedCal = averageOnLoggedDays('calories');
+    const avgLoggedProtein = averageOnLoggedDays('protein');
+    const calorieGoalDays = loggedDays.filter((day) => Number(day.calories) >= userGoals.calories * 0.9 && Number(day.calories) <= userGoals.calories * 1.1).length;
 
     const avgFiber = Math.round(sum('fiber') / count);
     const avgSugar = Math.round(sum('sugar') / count);
@@ -304,7 +312,10 @@ export default function NutritionTab({ user }) {
       return acc;
     }, {});
 
-    const totalMacroGrams = avgCarbs + avgFat + avgProtein || 1;
+    const proteinCalories = avgProtein * 4;
+    const carbsCalories = avgCarbs * 4;
+    const fatCalories = avgFat * 9;
+    const totalMacroCalories = proteinCalories + carbsCalories + fatCalories || 1;
     const hasAnyData = sumCal > 0;
 
     return {
@@ -313,6 +324,11 @@ export default function NutritionTab({ user }) {
       avgCarbs,
       avgFat,
       avgProtein,
+      avgLoggedCal,
+      avgLoggedProtein,
+      loggedDayCount,
+      daysInRange: analyticsData.length,
+      calorieGoalDays,
       avgFiber,
       avgSugar,
       avgPotassium,
@@ -336,9 +352,9 @@ export default function NutritionTab({ user }) {
       lunchPct: totalMealCal > 1 ? Math.round((sumLunch / totalMealCal) * 100) : 0,
       dinnerPct: totalMealCal > 1 ? Math.round((sumDinner / totalMealCal) * 100) : 0,
       snackPct: totalMealCal > 1 ? Math.round((sumSnack / totalMealCal) * 100) : 0,
-      carbsPct: Math.round((avgCarbs / totalMacroGrams) * 100),
-      fatPct: Math.round((avgFat / totalMacroGrams) * 100),
-      proteinPct: Math.round((avgProtein / totalMacroGrams) * 100),
+      carbsPct: Math.round((carbsCalories / totalMacroCalories) * 100),
+      fatPct: Math.round((fatCalories / totalMacroCalories) * 100),
+      proteinPct: Math.round((proteinCalories / totalMacroCalories) * 100),
       // Scales with however many days are actually in the viewed range
       // (7 for weekly, 28-31 for monthly, 365/366 for yearly) instead of a
       // hardcoded 7, so this stays correct across all three period types.
@@ -346,6 +362,31 @@ export default function NutritionTab({ user }) {
     };
   }, [analyticsData, userGoals]);
 
+  const localInsights = useMemo(() => {
+    if (!totals.hasAnyData) return [];
+    const insights = [];
+    const loggingRate = totals.daysInRange ? Math.round((totals.loggedDayCount / totals.daysInRange) * 100) : 0;
+    const calorieDifference = totals.avgLoggedCal - userGoals.calories;
+    if (Math.abs(calorieDifference) <= userGoals.calories * 0.1) {
+      insights.push('Your average intake on logged days is within 10% of your daily calorie target.');
+    } else if (calorieDifference > 0) {
+      insights.push('Your logged-day average is about ' + Math.abs(calorieDifference).toLocaleString() + ' kcal above your daily target.');
+    } else {
+      insights.push('Your logged-day average is about ' + Math.abs(calorieDifference).toLocaleString() + ' kcal below your daily target.');
+    }
+    const proteinGap = userGoals.protein - totals.avgLoggedProtein;
+    if (proteinGap > 5) {
+      insights.push('Your logged-day protein average is about ' + Math.round(proteinGap) + ' g below your target.');
+    } else {
+      insights.push('Your logged-day protein average is close to or above your target.');
+    }
+    if (loggingRate < 70) {
+      insights.push('You logged food on ' + loggingRate + '% of days in this period. More complete logs will make the report more representative.');
+    } else {
+      insights.push('You logged food on ' + loggingRate + '% of days in this period, giving you a useful snapshot of your routine.');
+    }
+    return insights.slice(0, 3);
+  }, [totals, userGoals]);
   const analyzeCurrentPeriod = async () => {
     if (!userId || !totals.hasAnyData) {
       setAiNotice('Log some meals in this period before requesting an AI analysis.');
@@ -379,6 +420,31 @@ export default function NutritionTab({ user }) {
     }
   };
 
+  const exportReport = () => {
+    if (!analyticsData.length || !totals.hasAnyData) return;
+    const columns = [
+      ['Date', 'fullDate'], ['Calories (kcal)', 'calories'], ['Protein (g)', 'protein'],
+      ['Carbs (g)', 'carbs'], ['Fat (g)', 'fat'], ['Fiber (g)', 'fiber'], ['Sugar (g)', 'sugar'],
+      ['Potassium (mg)', 'potassium'], ['Sodium (mg)', 'sodium'], ['Saturated Fat (g)', 'satFat'],
+      ['Trans Fat (g)', 'transFat'], ['Cholesterol (mg)', 'cholesterol'], ['Vitamin A (mcg)', 'vitaminA'],
+      ['Vitamin C (mg)', 'vitaminC'], ['Calcium (mg)', 'calcium'], ['Iron (mg)', 'iron'],
+      ['Vitamin B12 (mcg)', 'vitaminB12'], ['Vitamin D (mcg)', 'vitaminD'],
+    ];
+    const escapeCsv = (value) => '"' + String(value ?? '').replace(/"/g, '""') + '"';
+    const rows = [
+      columns.map(([label]) => escapeCsv(label)).join(','),
+      ...analyticsData.map((day) => columns.map(([, key]) => escapeCsv(day[key] ?? 0)).join(',')),
+    ];
+    const file = new Blob(['\uFEFF', rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'nutriai-' + period + '-' + rangeStart + '-to-' + rangeEnd + '.csv';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
   useEffect(() => {
     setAiSummary('');
     setAiNotice('');
@@ -415,60 +481,36 @@ export default function NutritionTab({ user }) {
   return (
     <div className="w-full max-w-none mx-auto text-white space-y-5 font-sans">
 
-      {/* Nutrition page header and report controls */}
-      <div className="space-y-4 pb-4 border-b border-slate-800/80 relative z-10">
-        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-400">Your health at a glance</p>
+      {/* Nutrition report controls */}
+      <header className="rounded-2xl border border-slate-800/80 bg-[#101722] p-4 sm:p-5 space-y-4">
+        <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-400">Your health at a glance</p>
             <h2 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-white">Nutrition Overview</h2>
-            <p className="mt-1 text-sm text-slate-400">Review your intake, monitor your goals, and understand your progress.</p>
+            <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-400">Understand your food log, compare intake with your goals, and track changes over time.</p>
           </div>
-          <div className="flex flex-col sm:flex-row gap-3">
-          {/* Date Range Selector */}
-          <div className="flex items-center justify-between sm:justify-end space-x-3 text-xs bg-[#121824] px-3.5 py-2 rounded-2xl border border-slate-800">
-            <button
-              onClick={() => setRangeOffset((w) => w - 1)}
-              className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <span className="font-mono text-slate-300 font-medium tracking-wide">{rangeLabel}</span>
-            <button
-              onClick={() => setRangeOffset((w) => Math.min(0, w + 1))}
-              disabled={rangeOffset >= 0}
-              className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="bg-[#121824] p-1 rounded-xl border border-slate-800 flex items-center self-start sm:self-auto">
-          {(['weekly', 'monthly', 'yearly']).map((p) => (
-            <button
-              key={p}
-              onClick={() => setPeriod(p)}
-              className={`px-3.5 py-1.5 rounded-xl text-[11px] font-bold transition-all duration-200 ${
-                period === p
-                  ? 'bg-white/10 text-white border border-white/20'
-                  : 'text-slate-500 hover:text-slate-300'
-              }`}
-            >
-              {PERIOD_LABELS[p]}
-            </button>
-          ))}
+          <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-700/80 bg-[#0b111b] px-3 py-2">
+              <button type="button" aria-label="Previous period" onClick={() => setRangeOffset((offset) => offset - 1)} className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-white focus:outline-none focus:ring-2 focus:ring-emerald-400/60"><ChevronLeft className="h-4 w-4" /></button>
+              <span className="min-w-[125px] text-center text-xs font-semibold text-slate-200">{rangeLabel}</span>
+              <button type="button" aria-label="Next period" onClick={() => setRangeOffset((offset) => Math.min(0, offset + 1))} disabled={rangeOffset >= 0} className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-30 focus:outline-none focus:ring-2 focus:ring-emerald-400/60"><ChevronRight className="h-4 w-4" /></button>
+            </div>
+            <div className="flex rounded-xl border border-slate-700/80 bg-[#0b111b] p-1">
+              {(['weekly', 'monthly', 'yearly']).map((value) => <button key={value} type="button" onClick={() => setPeriod(value)} aria-pressed={period === value} className={period === value ? 'rounded-lg border border-emerald-400/20 bg-emerald-500/15 px-3 py-2 text-[11px] font-bold text-emerald-300' : 'rounded-lg px-3 py-2 text-[11px] font-semibold text-slate-400 transition hover:text-white'}>{PERIOD_LABELS[value]}</button>)}
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setRefreshKey((key) => key + 1)} disabled={loading} title="Refresh report data" aria-label="Refresh report data" className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700/80 bg-[#0b111b] px-3 py-2.5 text-xs font-semibold text-slate-300 transition hover:border-slate-500 hover:text-white disabled:opacity-40"><RefreshCw className={loading ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} /><span className="sm:hidden">Refresh</span></button>
+              <button type="button" onClick={exportReport} disabled={!totals.hasAnyData} className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-3.5 py-2.5 text-xs font-bold text-[#06251a] transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"><Download className="h-3.5 w-3.5" />Export CSV</button>
+            </div>
           </div>
         </div>
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="inline-flex rounded-xl border border-slate-800 bg-[#121824] p-1">
-            {(['calories', 'nutrients']).map((tab) => (
-              <button key={tab} onClick={() => setActiveTab(tab)} className={`rounded-lg px-3.5 py-2 text-xs font-semibold transition-colors ${activeTab === tab ? 'bg-emerald-500/15 text-emerald-300' : 'text-slate-400 hover:text-white'}`}>
-                {tab === 'calories' ? 'Overview' : 'Nutrients' }
-              </button>
-            ))}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-t border-slate-800/80 pt-3">
+          <div className="inline-flex w-fit rounded-xl border border-slate-700/80 bg-[#0b111b] p-1">
+            {(['calories', 'nutrients']).map((tab) => <button key={tab} type="button" onClick={() => setActiveTab(tab)} aria-pressed={activeTab === tab} className={activeTab === tab ? 'rounded-lg bg-emerald-500/15 px-3.5 py-2 text-xs font-semibold text-emerald-300' : 'rounded-lg px-3.5 py-2 text-xs font-semibold text-slate-400 transition hover:text-white'}>{tab === 'calories' ? 'Overview' : 'Nutrients'}</button>)}
           </div>
-          <p className="text-xs text-slate-500">Figures are averages across the selected date range.</p>
+          <p className="text-[11px] text-slate-500">{rangeStart} to {rangeEnd} · Averages use the selected date range.</p>
         </div>
-      </div>
-
+      </header>
       {loading ? (
         <div className="py-16 flex items-center justify-center">
           <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
@@ -485,53 +527,29 @@ export default function NutritionTab({ user }) {
             </div>
           )}
 
-          <section className="rounded-2xl border border-slate-800 bg-[#121824] p-4 sm:p-5 space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold text-white">Nutrition Analysis</h3>
-                <p className="mt-1 text-xs leading-relaxed text-slate-400">
-                  Get an optional summary of your {period} food log, calorie intake, and macros.
-                </p>
+          <section className="rounded-2xl border border-slate-800/80 bg-[#121824] p-4 sm:p-5">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-300"><Sparkles className="h-4 w-4" /></div>
+                <div><h3 className="text-sm font-semibold text-white">Nutrition Analysis</h3><p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-400">Generate an optional AI summary of your {period} food log, calorie intake, and macronutrient trends.</p></div>
               </div>
-              <button
-                type="button"
-                onClick={analyzeCurrentPeriod}
-                disabled={aiLoading || loading || !totals.hasAnyData}
-                className="inline-flex shrink-0 items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {aiLoading ? 'Analyzing…' : 'Analyze nutrition'}
-              </button>
+              <button type="button" onClick={analyzeCurrentPeriod} disabled={aiLoading || loading || !totals.hasAnyData} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40">{aiLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}{aiLoading ? 'Analyzing…' : aiSummary ? 'Analyze again' : 'Analyze nutrition'}</button>
             </div>
-            {aiSummary ? (
-              <p className="rounded-xl border border-slate-800 bg-[#0b0f17] p-3 text-sm leading-relaxed text-slate-200">{aiSummary}</p>
-            ) : (
-              <p className="text-xs text-slate-500">
-                AI is optional. Your food diary and nutrition reports remain available even when AI usage is limited.
-              </p>
-            )}
-            {aiNotice && <p className="text-xs text-slate-400" role="status">{aiNotice}</p>}
-            <p className="text-[10px] text-slate-600">For general information only; not a substitute for professional nutrition advice.</p>
+            {aiSummary ? <div className="mt-4 rounded-xl border border-slate-700/70 bg-[#0b111b] p-4"><p className="text-sm leading-7 text-slate-200">{aiSummary}</p></div> : <p className="mt-4 rounded-xl border border-dashed border-slate-700/70 px-3 py-3 text-xs leading-relaxed text-slate-500">AI is optional. Your charts, food diary, and locally calculated insights remain available even when free AI usage is limited.</p>}
+            {aiNotice && <p className="mt-3 text-xs leading-relaxed text-slate-400" role="status">{aiNotice}</p>}
+            <p className="mt-3 text-[10px] text-slate-600">AI output is general information, not medical advice. Cached summaries may be shown to conserve free AI usage.</p>
           </section>
 
-          <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-            <div className="rounded-2xl border border-slate-800 bg-[#121824] p-4">
-              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Logging consistency</p>
-              <p className="mt-1 text-xl font-bold text-white">{analyticsData.filter((day) => Number(day.calories) > 0).length}
-                <span className="ml-1 text-xs font-medium text-slate-500">/ {analyticsData.length} days tracked</span>
-              </p>
-              <p className="mt-1 text-[11px] text-slate-400">
-                {analyticsData.length ? Math.round((analyticsData.filter((day) => Number(day.calories) > 0).length / analyticsData.length) * 100) : 0}% of days have food entries
-              </p>
-            </div>
-            <div className="rounded-2xl border border-slate-800 bg-[#121824] p-4">
-              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Protein goal average</p>
-              <p className="mt-1 text-xl font-bold text-white">{totals.avgProtein}g
-                <span className="ml-1 text-xs font-medium text-slate-500">/ {userGoals.protein}g per day</span>
-              </p>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
-                <div className="h-full rounded-full bg-emerald-400" style={{ width: `${Math.min(100, userGoals.protein > 0 ? (totals.avgProtein / userGoals.protein) * 100 : 0)}%` }} />
-              </div>
-            </div>
+          <section className="rounded-2xl border border-slate-800/80 bg-[#121824] p-4 sm:p-5">
+            <div className="flex items-center gap-2"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-800 text-slate-300"><TrendingUp className="h-4 w-4" /></div><div><h3 className="text-sm font-semibold text-white">Quick Insights</h3><p className="text-[11px] text-slate-500">Based on your logged data · no AI request needed</p></div></div>
+            {localInsights.length ? <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-3">{localInsights.map((insight, index) => <div key={index} className="rounded-xl border border-slate-800 bg-[#0b111b] p-3 text-xs leading-relaxed text-slate-300">{insight}</div>)}</div> : <p className="mt-4 rounded-xl border border-dashed border-slate-700/70 p-3 text-xs text-slate-500">Log meals during this period to see calorie, protein, and consistency insights here.</p>}
+          </section>
+
+          <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+            <div className="rounded-2xl border border-slate-800 bg-[#121824] p-4"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Calories on logged days</p><p className="mt-2 text-2xl font-bold text-white">{totals.hasAnyData ? totals.avgLoggedCal.toLocaleString() : '—'} <span className="text-xs font-medium text-slate-400">kcal</span></p><p className="mt-1 text-[11px] text-slate-500">Logged-day avg · target {userGoals.calories.toLocaleString()} kcal</p><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-emerald-400" style={{ width: `${Math.min(100, userGoals.calories > 0 ? totals.avgLoggedCal / userGoals.calories * 100 : 0)}%` }} /></div><p className="mt-1.5 text-[10px] text-slate-500">Calendar-day average: {totals.avgCal.toLocaleString()} kcal</p></div>
+            <div className="rounded-2xl border border-slate-800 bg-[#121824] p-4"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Protein on logged days</p><p className="mt-2 text-2xl font-bold text-white">{totals.hasAnyData ? totals.avgLoggedProtein : '—'} <span className="text-xs font-medium text-slate-400">g</span></p><p className="mt-1 text-[11px] text-slate-500">Logged-day avg · target {userGoals.protein} g</p><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-amber-400" style={{ width: `${Math.min(100, userGoals.protein > 0 ? totals.avgLoggedProtein / userGoals.protein * 100 : 0)}%` }} /></div><p className="mt-1.5 text-[10px] text-slate-500">Calendar-day average: {totals.avgProtein} g</p></div>
+            <div className="rounded-2xl border border-slate-800 bg-[#121824] p-4"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Logging consistency</p><p className="mt-2 text-2xl font-bold text-white">{totals.loggedDayCount}<span className="ml-1 text-xs font-medium text-slate-500">/ {totals.daysInRange} days</span></p><p className="mt-1 text-[11px] text-slate-500">{totals.daysInRange ? Math.round(totals.loggedDayCount / totals.daysInRange * 100) : 0}% of days include food entries</p><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-sky-400" style={{ width: `${totals.daysInRange ? totals.loggedDayCount / totals.daysInRange * 100 : 0}%` }} /></div></div>
+            <div className="rounded-2xl border border-slate-800 bg-[#121824] p-4"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Days near calorie goal</p><p className="mt-2 text-2xl font-bold text-white">{totals.calorieGoalDays}<span className="ml-1 text-xs font-medium text-slate-500">days</span></p><p className="mt-1 text-[11px] text-slate-500">Within 10% of target on logged days</p><p className="mt-3 text-[10px] text-slate-500">A tracking indicator, not a measure of health or success.</p></div>
           </section>
 
           {/* TAB 1: ENERGY INTAKE */}
@@ -541,12 +559,12 @@ export default function NutritionTab({ user }) {
               {/* Key nutrition averages */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="rounded-2xl border border-slate-800 bg-[#121824] p-4">
-                  <p className="text-xs font-medium text-slate-400">Calories · daily average</p>
+                  <p className="text-xs font-medium text-slate-400">Calories · calendar-day average</p>
                   <p className="mt-2 text-2xl font-bold tracking-tight text-white">{totals.hasAnyData ? totals.avgCal.toLocaleString() : '—'} <span className="text-xs font-medium text-slate-400">kcal</span></p>
                   <p className="mt-1 text-[11px] text-slate-500">Goal: {userGoals.calories.toLocaleString()} kcal</p>
                 </div>
                 <div className="rounded-2xl border border-slate-800 bg-[#121824] p-4">
-                  <p className="text-xs font-medium text-slate-400">Protein · daily average</p>
+                  <p className="text-xs font-medium text-slate-400">Protein · calendar-day average</p>
                   <p className="mt-2 text-2xl font-bold tracking-tight text-white">{totals.hasAnyData ? totals.avgProtein : '—'} <span className="text-xs font-medium text-slate-400">g</span></p>
                   <p className="mt-1 text-[11px] text-slate-500">Goal: {userGoals.protein} g</p>
                 </div>
@@ -580,6 +598,7 @@ export default function NutritionTab({ user }) {
                       <XAxis dataKey="day" stroke="#475569" fontSize={11} tickLine={false} axisLine={{ stroke: '#1e293b' }} />
                       <YAxis stroke="#475569" fontSize={10} tickLine={false} axisLine={false} />
                       <Tooltip content={<CustomTooltip />} />
+                      <ReferenceLine y={userGoals.calories} stroke="#F59E0B" strokeDasharray="5 5" />
                       <Area type="monotone" dataKey="calories" stroke="#10B981" strokeWidth={2.5} fillOpacity={1} fill="url(#calGradient)" />
                     </AreaChart>
                   </ResponsiveContainer>
@@ -665,7 +684,8 @@ export default function NutritionTab({ user }) {
                   <div>
                     <div className="text-xs font-bold text-slate-200">Daily Water Average</div>
                     <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                      <span className="text-blue-400 font-bold">{avgWaterMl} ml</span> / {userGoals.waterMl} ml goal
+                      <span className="text-blue-400 font-bold">{avgWaterMl ? avgWaterMl.toLocaleString() : '—'} ml</span> / {userGoals.waterMl.toLocaleString()} ml goal
+                      <p className="mt-1 text-[10px] text-slate-500">{waterStats.daysWithData} of {waterStats.totalDays} days recorded on this device</p>
                     </div>
                   </div>
                 </div>
