@@ -3,9 +3,9 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { 
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Legend
+  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, ReferenceLine
 } from 'recharts';
-import { ChevronLeft, ChevronRight, Loader2, Droplet, Layers, ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, Droplet, ChevronDown, ChevronUp, Download, RefreshCw, Sparkles, Target, TrendingUp, CalendarDays } from 'lucide-react';
 import {
   getPHDateParts,
   dateStringToUTCAnchor,
@@ -237,29 +237,29 @@ export default function NutritionTab({ user }) {
     });
   }, [analyticsData, period, rangeStart]);
 
-  // Best-effort water average over the viewed range — water isn't stored in
-  // the database anywhere in this app yet (only per-day localStorage on the
-  // dashboard), so this only reflects days logged on THIS browser/device.
-  const avgWaterMl = useMemo(() => {
-    if (typeof window === 'undefined') return 0;
+  // Water logs are currently saved in this browser's localStorage, not in FoodLog.
+  // Average only recorded days; an unrecorded day is unknown, not zero water.
+  const waterStats = useMemo(() => {
+    if (typeof window === 'undefined') return { average: 0, daysWithData: 0, totalDays: 0 };
     let total = 0;
     let daysWithData = 0;
-    let totalDaysInRange = 0;
+    let totalDays = 0;
     let cursor = dateStringToUTCAnchor(rangeStart);
     const endAnchor = dateStringToUTCAnchor(rangeEnd);
     while (cursor.getTime() <= endAnchor.getTime()) {
-      totalDaysInRange++;
+      totalDays++;
       const key = utcAnchorToDateString(cursor);
-      const val = localStorage.getItem(`water_${key}`);
-      if (val !== null) {
-        total += parseInt(val, 10) || 0;
+      const value = localStorage.getItem('water_' + key);
+      if (value !== null && value !== '') {
+        total += Math.max(0, Number.parseInt(value, 10) || 0);
         daysWithData++;
       }
       cursor = addDaysUTC(cursor, 1);
     }
-    return totalDaysInRange > 0 ? Math.round(total / totalDaysInRange) : 0;
-  }, [rangeStart, rangeEnd, analyticsData]);
+    return { average: daysWithData ? Math.round(total / daysWithData) : 0, daysWithData, totalDays };
+  }, [rangeStart, rangeEnd, refreshKey]);
 
+  const avgWaterMl = waterStats.average;
   const totals = useMemo(() => {
     const count = analyticsData.length || 1;
     const sum = (key) => analyticsData.reduce((a, b) => a + (b[key] || 0), 0);
@@ -278,6 +278,13 @@ export default function NutritionTab({ user }) {
     const avgCarbs = Math.round(sumCarbs / count);
     const avgFat = Math.round(sumFat / count);
     const avgProtein = Math.round(sumProtein / count);
+
+    const loggedDays = analyticsData.filter((day) => Number(day.calories) > 0);
+    const loggedDayCount = loggedDays.length;
+    const averageOnLoggedDays = (key) => loggedDayCount ? Math.round(loggedDays.reduce((total, day) => total + (Number(day[key]) || 0), 0) / loggedDayCount) : 0;
+    const avgLoggedCal = averageOnLoggedDays('calories');
+    const avgLoggedProtein = averageOnLoggedDays('protein');
+    const calorieGoalDays = loggedDays.filter((day) => Number(day.calories) >= userGoals.calories * 0.9 && Number(day.calories) <= userGoals.calories * 1.1).length;
 
     const avgFiber = Math.round(sum('fiber') / count);
     const avgSugar = Math.round(sum('sugar') / count);
@@ -304,7 +311,10 @@ export default function NutritionTab({ user }) {
       return acc;
     }, {});
 
-    const totalMacroGrams = avgCarbs + avgFat + avgProtein || 1;
+    const proteinCalories = avgProtein * 4;
+    const carbsCalories = avgCarbs * 4;
+    const fatCalories = avgFat * 9;
+    const totalMacroCalories = proteinCalories + carbsCalories + fatCalories || 1;
     const hasAnyData = sumCal > 0;
 
     return {
@@ -313,6 +323,11 @@ export default function NutritionTab({ user }) {
       avgCarbs,
       avgFat,
       avgProtein,
+      avgLoggedCal,
+      avgLoggedProtein,
+      loggedDayCount,
+      daysInRange: analyticsData.length,
+      calorieGoalDays,
       avgFiber,
       avgSugar,
       avgPotassium,
@@ -336,9 +351,9 @@ export default function NutritionTab({ user }) {
       lunchPct: totalMealCal > 1 ? Math.round((sumLunch / totalMealCal) * 100) : 0,
       dinnerPct: totalMealCal > 1 ? Math.round((sumDinner / totalMealCal) * 100) : 0,
       snackPct: totalMealCal > 1 ? Math.round((sumSnack / totalMealCal) * 100) : 0,
-      carbsPct: Math.round((avgCarbs / totalMacroGrams) * 100),
-      fatPct: Math.round((avgFat / totalMacroGrams) * 100),
-      proteinPct: Math.round((avgProtein / totalMacroGrams) * 100),
+      carbsPct: Math.round((carbsCalories / totalMacroCalories) * 100),
+      fatPct: Math.round((fatCalories / totalMacroCalories) * 100),
+      proteinPct: Math.round((proteinCalories / totalMacroCalories) * 100),
       // Scales with however many days are actually in the viewed range
       // (7 for weekly, 28-31 for monthly, 365/366 for yearly) instead of a
       // hardcoded 7, so this stays correct across all three period types.
@@ -346,6 +361,31 @@ export default function NutritionTab({ user }) {
     };
   }, [analyticsData, userGoals]);
 
+  const localInsights = useMemo(() => {
+    if (!totals.hasAnyData) return [];
+    const insights = [];
+    const loggingRate = totals.daysInRange ? Math.round((totals.loggedDayCount / totals.daysInRange) * 100) : 0;
+    const calorieDifference = totals.avgLoggedCal - userGoals.calories;
+    if (Math.abs(calorieDifference) <= userGoals.calories * 0.1) {
+      insights.push('Your average intake on logged days is within 10% of your daily calorie target.');
+    } else if (calorieDifference > 0) {
+      insights.push('Your logged-day average is about ' + Math.abs(calorieDifference).toLocaleString() + ' kcal above your daily target.');
+    } else {
+      insights.push('Your logged-day average is about ' + Math.abs(calorieDifference).toLocaleString() + ' kcal below your daily target.');
+    }
+    const proteinGap = userGoals.protein - totals.avgLoggedProtein;
+    if (proteinGap > 5) {
+      insights.push('Your logged-day protein average is about ' + Math.round(proteinGap) + ' g below your target.');
+    } else {
+      insights.push('Your logged-day protein average is close to or above your target.');
+    }
+    if (loggingRate < 70) {
+      insights.push('You logged food on ' + loggingRate + '% of days in this period. More complete logs will make the report more representative.');
+    } else {
+      insights.push('You logged food on ' + loggingRate + '% of days in this period, giving you a useful snapshot of your routine.');
+    }
+    return insights.slice(0, 3);
+  }, [totals, userGoals]);
   const analyzeCurrentPeriod = async () => {
     if (!userId || !totals.hasAnyData) {
       setAiNotice('Log some meals in this period before requesting an AI analysis.');
@@ -379,6 +419,31 @@ export default function NutritionTab({ user }) {
     }
   };
 
+  const exportReport = () => {
+    if (!analyticsData.length || !totals.hasAnyData) return;
+    const columns = [
+      ['Date', 'fullDate'], ['Calories (kcal)', 'calories'], ['Protein (g)', 'protein'],
+      ['Carbs (g)', 'carbs'], ['Fat (g)', 'fat'], ['Fiber (g)', 'fiber'], ['Sugar (g)', 'sugar'],
+      ['Potassium (mg)', 'potassium'], ['Sodium (mg)', 'sodium'], ['Saturated Fat (g)', 'satFat'],
+      ['Trans Fat (g)', 'transFat'], ['Cholesterol (mg)', 'cholesterol'], ['Vitamin A (mcg)', 'vitaminA'],
+      ['Vitamin C (mg)', 'vitaminC'], ['Calcium (mg)', 'calcium'], ['Iron (mg)', 'iron'],
+      ['Vitamin B12 (mcg)', 'vitaminB12'], ['Vitamin D (mcg)', 'vitaminD'],
+    ];
+    const escapeCsv = (value) => '"' + String(value ?? '').replace(/"/g, '""') + '"';
+    const rows = [
+      columns.map(([label]) => escapeCsv(label)).join(','),
+      ...analyticsData.map((day) => columns.map(([, key]) => escapeCsv(day[key] ?? 0)).join(',')),
+    ];
+    const file = new Blob(['\uFEFF', rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'nutriai-' + period + '-' + rangeStart + '-to-' + rangeEnd + '.csv';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
   useEffect(() => {
     setAiSummary('');
     setAiNotice('');
