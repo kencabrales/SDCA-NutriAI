@@ -4,6 +4,16 @@ import dbConnect from '@/lib/mongodb';
 import FoodLog from '@/lib/FoodLog';
 import User from '@/lib/User';
 
+function getStoredAmount(amount, unit) {
+  const value = Number(amount);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  if (unit === 'kg') return value * 1000;
+  if (unit === 'lb') return value * 453.59237;
+  if (unit === 'oz') return value * 28.349523125;
+  // ml, pieces, and servings are kept in their own declared unit.
+  return value;
+}
+
 // Helper to check and update streak
 async function handleStreakUpdate(userId) {
   try {
@@ -86,6 +96,10 @@ export async function POST(request) {
 
     // --- BATCH INSERTION ---
     if (items && Array.isArray(items) && items.length > 0) {
+      const invalidItem = items.find((item) => !item.foodName && !item.name ||
+        ![item.amount, item.calories, item.protein, item.carbs, item.fat].every((value) => value !== undefined && value !== null && value !== '' && Number.isFinite(Number(value))) ||
+        Number(item.amount) <= 0 || ['calories','protein','carbs','fat'].some((field) => Number(item[field]) < 0));
+      if (invalidItem) return NextResponse.json({ error: 'Every food entry must include a name, serving amount, and valid calories and macro values.' }, { status: 400 });
       const targetedDateString = body.date || body.logDate || new Date().toISOString().split('T')[0];
 
             const logsToInsert = items.map((item) => {
@@ -93,7 +107,7 @@ export async function POST(request) {
         const mealType = (item.mealType || 'snacks').toLowerCase();
         const unit = item.unit || 'g';
         const numericAmount = parseFloat(item.amount) || 100;
-        const weightGrams = unit === 'oz' ? numericAmount * 28.3495 : numericAmount;
+        const weightGrams = getStoredAmount(numericAmount, unit);
 
         return {
           userId,
@@ -102,10 +116,10 @@ export async function POST(request) {
           amount: numericAmount,
           weightGrams,
           unit,
-          calories: item.calories !== undefined ? Math.round(parseFloat(item.calories)) : Math.round(weightGrams * 1.5),
-          protein: item.protein !== undefined ? parseFloat(parseFloat(item.protein).toFixed(1)) : parseFloat((weightGrams * 0.12).toFixed(1)),
-          carbs: item.carbs !== undefined ? parseFloat(parseFloat(item.carbs).toFixed(1)) : parseFloat((weightGrams * 0.18).toFixed(1)),
-          fat: item.fat !== undefined ? parseFloat(parseFloat(item.fat).toFixed(1)) : parseFloat((weightGrams * 0.03).toFixed(1)),
+          calories: item.calories !== undefined ? Math.round(parseFloat(item.calories)) : 0,
+          protein: item.protein !== undefined ? parseFloat(parseFloat(item.protein).toFixed(1)) : 0,
+          carbs: item.carbs !== undefined ? parseFloat(parseFloat(item.carbs).toFixed(1)) : 0,
+          fat: item.fat !== undefined ? parseFloat(parseFloat(item.fat).toFixed(1)) : 0,
           sodium: parseFloat(item.sodium) || 0,
           sugar: parseFloat(item.sugar) || 0,
           fiber: parseFloat(item.fiber) || 0,
@@ -139,27 +153,29 @@ export async function POST(request) {
     const unit = body.unit || 'g';
     const numericAmount = parseFloat(body.amount) || 100;
 
-    if (!foodName || !targetedDateString) {
-      return NextResponse.json({ error: 'Missing required fields: foodName and date are required' }, { status: 400 });
+    if (!foodName || !targetedDateString ||
+        ![body.amount, body.calories, body.protein, body.carbs, body.fat].every((value) => value !== undefined && value !== null && value !== '' && Number.isFinite(Number(value))) ||
+        Number(body.amount) <= 0 || ['calories','protein','carbs','fat'].some((field) => Number(body[field]) < 0)) {
+      return NextResponse.json({ error: 'Food name, date, serving amount, calories, protein, carbs, and fat are required and must be valid numbers' }, { status: 400 });
     }
 
-    const weightGrams = unit === 'oz' ? numericAmount * 28.3495 : numericAmount;
+    const weightGrams = getStoredAmount(numericAmount, unit);
 
     const calories = (body.calories !== undefined && body.calories !== null && body.calories !== '') 
       ? Math.round(parseFloat(body.calories)) 
-      : Math.round(weightGrams * 1.5);
+      : 0;
 
     const protein = (body.protein !== undefined && body.protein !== null && body.protein !== '') 
       ? parseFloat(parseFloat(body.protein).toFixed(1)) 
-      : parseFloat((weightGrams * 0.12).toFixed(1));
+      : 0;
 
     const carbs = (body.carbs !== undefined && body.carbs !== null && body.carbs !== '') 
       ? parseFloat(parseFloat(body.carbs).toFixed(1)) 
-      : parseFloat((weightGrams * 0.18).toFixed(1));
+      : 0;
 
     const fat = (body.fat !== undefined && body.fat !== null && body.fat !== '') 
       ? parseFloat(parseFloat(body.fat).toFixed(1)) 
-      : parseFloat((weightGrams * 0.03).toFixed(1));
+      : 0;
 
         const newLog = await FoodLog.create({
       userId,

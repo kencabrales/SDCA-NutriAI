@@ -4,6 +4,7 @@ import FoodLog from '@/lib/FoodLog';
 import User from '@/lib/User';
 import AIInsight from '@/lib/AIInsight';
 import { generateJSON } from '@/lib/aiClient';
+import { recordAIUsage } from '@/lib/recordAIUsage';
 import { getTodayPH, dateStringToUTCAnchor, addDaysUTC, utcAnchorToDateString } from '@/lib/dateUtils';
 
 const CACHE_FRESH_MS = 5 * 60 * 1000;
@@ -45,6 +46,7 @@ export async function GET(req) {
     const cacheAge = cached ? Date.now() - new Date(cached.generatedAt).getTime() : Infinity;
 
     if (cached && !forceRefresh && cacheAge < CACHE_FRESH_MS) {
+      await recordAIUsage({ userId, feature: 'daily-insights-cache', status: 'cached' });
       return NextResponse.json({
         mealSuggestion: cached.mealSuggestion,
         behaviorInsight: cached.behaviorInsight,
@@ -155,7 +157,7 @@ Food log history (last seven days):
 ${JSON.stringify(dailySummaries, null, 2)}`;
 
     try {
-      const result = await withTimeout(generateJSON(prompt, { retries: 1 }), GENERATION_TIMEOUT_MS);
+      const result = await withTimeout(generateJSON(prompt, { retries: 0, userId, feature: 'daily-insights' }), GENERATION_TIMEOUT_MS);
 
       const insight = {
         mealSuggestion: typeof result.mealSuggestion === 'string' ? result.mealSuggestion : null,

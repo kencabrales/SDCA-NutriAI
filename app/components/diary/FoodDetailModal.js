@@ -17,6 +17,10 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
     cup: 240,
     tbsp: 15,
     tsp: 5,
+    pc: 1,
+    pcs: 1,
+    piece: 1,
+    pieces: 1,
   };
 
   const [servings, setServings] = useState(1);
@@ -370,6 +374,7 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
                     <option value="l">Liters (l)</option>
                     <option value="kg">Kilograms (kg)</option>
                     <option value="lb">Pounds (lb)</option>
+                    <option value="pcs">Pieces (pcs)</option>
                     <option value="serving">Servings</option>
                   </select>
                 </div>

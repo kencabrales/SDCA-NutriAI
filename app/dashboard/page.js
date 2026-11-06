@@ -72,6 +72,15 @@ export default function Dashboard() {
     <main className="min-h-screen bg-[#0B121F] text-white p-3 md:p-6 font-sans">
       <div className="max-w-5xl mx-auto space-y-3 md:space-y-4">
         
+        {user && (user.role === 'admin' || user.isAdmin === true) && (
+          <div className="flex justify-end">
+            <button onClick={() => router.push('/dashboard/admin/ai-usage')}
+              className="inline-flex items-center gap-2 rounded-xl border border-cyan-800/60 bg-cyan-950/30 px-3 py-2 text-[11px] font-bold text-cyan-300 hover:bg-cyan-900/40 transition-colors">
+              <Sparkles className="w-3.5 h-3.5" /> AI Usage Monitor
+            </button>
+          </div>
+        )}
+
         <DashboardHeader 
           user={user} 
           calorieGoal={calorieGoal}

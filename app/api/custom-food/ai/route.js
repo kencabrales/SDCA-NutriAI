@@ -1,12 +1,13 @@
 // app/api/custom-food/ai/route.js
 import { NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
+import { recordAIUsage } from '@/lib/recordAIUsage';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export async function POST(req) {
   try {
-    const { foodName, brand } = await req.json();
+    const { foodName, brand, userId } = await req.json();
     
     if (!foodName || foodName.trim() === '') {
       return NextResponse.json({ success: false, error: 'Food name is required.' }, { status: 400 });
@@ -59,9 +60,12 @@ export async function POST(req) {
     });
 
     const parsedData = JSON.parse(response.text);
+    await recordAIUsage({ userId, feature: 'custom-food-variations', status: 'success', inputText: targetPrompt, outputText: response.text || '' });
     return NextResponse.json({ success: true, variations: parsedData.variations || [] });
 
   } catch (error) {
+    const status = error?.status || error?.response?.status || error?.code;
+    await recordAIUsage({ feature: 'custom-food-variations', status: Number(status) === 429 || String(status).includes('RESOURCE_EXHAUSTED') ? 'quota' : 'failed', errorCode: status || error?.name || 'GENERATION_ERROR' });
     console.error("AI VARIATION GENERATOR FAILURE:", error);
     return NextResponse.json({ success: false, error: "AI failed to generate options." }, { status: 500 });
   }
