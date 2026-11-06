@@ -80,21 +80,37 @@ export async function PUT(request, { params }) {
       return NextResponse.json({ error: 'Valid Log ID is required' }, { status: 400 });
     }
 
+    const amount = Number(body.amount);
+    const calories = Number(body.calories);
+    const protein = Number(body.protein);
+    const carbs = Number(body.carbs);
+    const fat = Number(body.fat);
+    if (!body.foodName || !body.unit || !body.mealType ||
+        ![amount, calories, protein, carbs, fat].every(Number.isFinite) ||
+        amount <= 0 || calories < 0 || protein < 0 || carbs < 0 || fat < 0) {
+      return NextResponse.json({ error: 'Food name, serving, unit, meal type, and valid nutrition values are required.' }, { status: 400 });
+    }
+
+    const weightGrams = body.unit === 'kg' ? amount * 1000
+      : body.unit === 'lb' ? amount * 453.59237
+      : body.unit === 'oz' ? amount * 28.349523125
+      : amount;
+
     const updatedLog = await FoodLog.findByIdAndUpdate(
       id,
-      { 
-        $set: {
-          foodName: body.foodName,
-          amount: parseFloat(body.amount),
-          unit: body.unit,
-          mealType: body.mealType,
-          calories: Math.round(body.calories),
-          carbs: parseFloat(body.carbs),
-          protein: parseFloat(body.protein),
-          fat: parseFloat(body.fat)
-        } 
-      },
-      { new: true } 
+      { $set: {
+        foodName: body.foodName.trim(),
+        amount,
+        weightGrams,
+        unit: body.unit,
+        mealType: body.mealType,
+        calories: Math.round(calories),
+        carbs: Number(carbs.toFixed(1)),
+        protein: Number(protein.toFixed(1)),
+        fat: Number(fat.toFixed(1)),
+        ...(body.logDate || body.date ? { logDate: body.logDate || body.date, date: body.logDate || body.date } : {}),
+      }},
+      { new: true, runValidators: true }
     );
 
     if (!updatedLog) {
