@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { getTodayPH } from '@/lib/dateUtils';
-import { ArrowLeft, LayoutDashboard, BarChart3, TrendingUp, AlertTriangle, CheckCircle, ChevronLeft, ChevronRight, Calendar, Sliders, Droplet } from 'lucide-react';
+import { ArrowLeft, LayoutDashboard, BarChart3, TrendingUp, AlertTriangle, CheckCircle, ChevronLeft, ChevronRight, Calendar, Sliders, Droplet, Sparkles } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 
 // 1. TOOLTIP FOR CALORIE TIMELINE GRAPH (Meal Breakdown)
