@@ -33,6 +33,8 @@ export async function POST(request) {
         firstName: user.firstName || '', 
         lastName: user.lastName || '', 
         email: user.email,
+        role: user.role || 'user',
+        isAdmin: user.isAdmin === true || user.role === 'admin',
         height: user.height || user.heightInput || 0,
         heightUnit: user.heightUnit || 'cm',
         weight: user.weight || user.weightInput || user.currentWeight || 0,
