@@ -108,6 +108,7 @@ export default function NutritionTab({ user }) {
   const [aiSummary, setAiSummary] = useState('');
   const [aiNotice, setAiNotice] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const userGoals = useMemo(() => deriveUserGoals(user), [user]);
 
@@ -191,7 +192,7 @@ export default function NutritionTab({ user }) {
       });
 
     return () => { cancelled = true; };
-  }, [userId, rangeStart, rangeEnd]);
+  }, [userId, rangeStart, rangeEnd, refreshKey]);
 
   const chartData = useMemo(() => {
     if (!analyticsData.length) return [];
@@ -563,26 +564,6 @@ export default function NutritionTab({ user }) {
             <div className="rounded-2xl border border-slate-800 bg-[#121824] p-4"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Logging consistency</p><p className="mt-2 text-2xl font-bold text-white">{totals.loggedDayCount}<span className="ml-1 text-xs font-medium text-slate-500">/ {totals.daysInRange} days</span></p><p className="mt-1 text-[11px] text-slate-500">{totals.daysInRange ? Math.round(totals.loggedDayCount / totals.daysInRange * 100) : 0}% of days include food entries</p><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-sky-400" style={{ width: `${totals.daysInRange ? totals.loggedDayCount / totals.daysInRange * 100 : 0}%` }} /></div></div>
             <div className="rounded-2xl border border-slate-800 bg-[#121824] p-4"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Days near calorie goal</p><p className="mt-2 text-2xl font-bold text-white">{totals.calorieGoalDays}<span className="ml-1 text-xs font-medium text-slate-500">days</span></p><p className="mt-1 text-[11px] text-slate-500">Within 10% of target on logged days</p><p className="mt-3 text-[10px] text-slate-500">A tracking indicator, not a measure of health or success.</p></div>
           </section>
-          <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-            <div className="rounded-2xl border border-slate-800 bg-[#121824] p-4">
-              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Logging consistency</p>
-              <p className="mt-1 text-xl font-bold text-white">{analyticsData.filter((day) => Number(day.calories) > 0).length}
-                <span className="ml-1 text-xs font-medium text-slate-500">/ {analyticsData.length} days tracked</span>
-              </p>
-              <p className="mt-1 text-[11px] text-slate-400">
-                {analyticsData.length ? Math.round((analyticsData.filter((day) => Number(day.calories) > 0).length / analyticsData.length) * 100) : 0}% of days have food entries
-              </p>
-            </div>
-            <div className="rounded-2xl border border-slate-800 bg-[#121824] p-4">
-              <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Protein goal average</p>
-              <p className="mt-1 text-xl font-bold text-white">{totals.avgProtein}g
-                <span className="ml-1 text-xs font-medium text-slate-500">/ {userGoals.protein}g per day</span>
-              </p>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
-                <div className="h-full rounded-full bg-emerald-400" style={{ width: `${Math.min(100, userGoals.protein > 0 ? (totals.avgProtein / userGoals.protein) * 100 : 0)}%` }} />
-              </div>
-            </div>
-          </section>
 
           {/* TAB 1: ENERGY INTAKE */}
           {activeTab === 'calories' && (
@@ -716,7 +697,8 @@ export default function NutritionTab({ user }) {
                   <div>
                     <div className="text-xs font-bold text-slate-200">Daily Water Average</div>
                     <div className="text-[11px] text-slate-400 font-mono mt-0.5">
-                      <span className="text-blue-400 font-bold">{avgWaterMl} ml</span> / {userGoals.waterMl} ml goal
+                      <span className="text-blue-400 font-bold">{avgWaterMl ? avgWaterMl.toLocaleString() : '—'} ml</span> / {userGoals.waterMl.toLocaleString()} ml goal
+                      <p className="mt-1 text-[10px] text-slate-500">{waterStats.daysWithData} of {waterStats.totalDays} days recorded on this device</p>
                     </div>
                   </div>
                 </div>
