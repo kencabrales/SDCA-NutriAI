@@ -146,12 +146,14 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
       const session = localStorage.getItem('user');
       if (session) {
         const parsedUser = JSON.parse(session);
-        fetchDashboardData(parsedUser.id || parsedUser._id, selectedDate);
+        const userId = parsedUser.id || parsedUser._id;
+        fetchDashboardData(userId, selectedDate);
+        fetchInsights(userId);
       }
     };
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
-  }, [selectedDate, fetchDashboardData]);
+  }, [selectedDate, fetchDashboardData, fetchInsights]);
 
   // --- HANDLERS & CALCULATIONS ---
   const handleLogout = () => {
