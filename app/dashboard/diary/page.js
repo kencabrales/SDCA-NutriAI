@@ -11,6 +11,7 @@ import FoodDetailModal from '../../components/diary/FoodDetailModal';
 import CreateRecipeModal from '../../components/diary/CreateRecipeModal';
 import CreateMealModal from '../../components/diary/CreateMealModal';
 import Toast from '../../components/Toast';
+import MacroRecommendations from '../../components/MacroRecommendations';
 import { ConfirmProvider, useConfirm } from '../../components/ConfirmContext';
 import {
   getTodayPH,
@@ -417,6 +418,19 @@ if (res.ok) {
               )}
             </div>
           </div>
+        )}
+
+        {user && (
+          <MacroRecommendations
+            userId={user.id || user._id}
+            selectedDate={currentDate}
+            onLogSuccess={async () => {
+              await fetchDailyLogs(user.id || user._id, currentDate);
+              if (currentDate === getTodayPH()) {
+                await fetchMealSuggestion(user.id || user._id, true);
+              }
+            }}
+          />
         )}
 
         {/* MINIMALIST CALORIE & MACRO DASHBOARD */}
