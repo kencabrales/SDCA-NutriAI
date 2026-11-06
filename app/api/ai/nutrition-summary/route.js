@@ -4,6 +4,7 @@ import FoodLog from '@/lib/FoodLog';
 import User from '@/lib/User';
 import AIInsight from '@/lib/AIInsight';
 import { generateJSON } from '@/lib/aiClient';
+import { recordAIUsage } from '@/lib/recordAIUsage';
 import { dateStringToUTCAnchor, utcAnchorToDateString, addDaysUTC, getWeekdayLabel } from '@/lib/dateUtils';
 
 const CACHE_FRESH_MS = 24 * 60 * 60 * 1000; // a range's summary is valid for a full day once generated
@@ -85,6 +86,7 @@ export async function GET(req) {
     const cacheAgeMs = cached ? Date.now() - new Date(cached.generatedAt).getTime() : Infinity;
 
     if (cached && !forceRefresh && cacheAgeMs < CACHE_FRESH_MS) {
+      await recordAIUsage({ userId, feature: 'nutrition-summary-cache', status: 'cached' });
       return NextResponse.json({ nutritionSummary: cached.nutritionSummary, cached: true });
     }
 
@@ -122,7 +124,7 @@ ${JSON.stringify(dailyTotals, null, 2)}
 Remember: return ONLY the JSON object.`;
 
     try {
-      const aiResult = await withTimeout(generateJSON(prompt, { retries: 0 }), GENERATION_TIMEOUT_MS);
+      const aiResult = await withTimeout(generateJSON(prompt, { retries: 0, userId, feature: 'nutrition-summary' }), GENERATION_TIMEOUT_MS);
 
       const saved = await AIInsight.findOneAndUpdate(
         { userId, rangeKey },
