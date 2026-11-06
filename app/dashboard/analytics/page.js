@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { getTodayPH } from '@/lib/dateUtils';
-import { ArrowLeft, LayoutDashboard, BarChart3, TrendingUp, AlertTriangle, CheckCircle, ChevronLeft, ChevronRight, Calendar, Sliders, Droplet, Sparkles } from 'lucide-react';
+import { ArrowLeft, LayoutDashboard, BarChart3, TrendingUp, AlertTriangle, CheckCircle, ChevronLeft, ChevronRight, Calendar, Sliders, Sparkles } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 
 // 1. TOOLTIP FOR CALORIE TIMELINE GRAPH (Meal Breakdown)
@@ -45,10 +45,7 @@ const CalorieTooltip = ({ active, payload }) => {
             <span className="text-gray-400">Total Calories:</span>
             <span className="font-mono text-[#00A86B]">{data.calories} kcal</span>
           </div>
-          <div className="flex justify-between border-t border-gray-800/40 pt-1 text-[11px] font-bold text-blue-400">
-            <span className="flex items-center gap-1"><Droplet className="w-3 h-3 fill-current" /> Water:</span>
-            <span className="font-mono">{data.water} ml</span>
-          </div>
+
         </div>
       </div>
     );
@@ -254,17 +251,16 @@ export default function AnalyticsDashboard() {
   };
 
   const clearDaysOnly = chartData.filter(d => !d.isAvgColumn);
-  const totalDaysCount = clearDaysOnly.length || 1;
+  const trackedDays = clearDaysOnly.filter((day) => day.calories > 0).length;
+  const totalDaysCount = trackedDays || 1;
   
   const sumProtein = clearDaysOnly.reduce((sum, d) => sum + d.protein, 0);
   const sumCarbs = clearDaysOnly.reduce((sum, d) => sum + d.carbs, 0);
   const sumFat = clearDaysOnly.reduce((sum, d) => sum + d.fat, 0);
-  const sumWater = clearDaysOnly.reduce((sum, d) => sum + d.water, 0);
 
   const avgProtein = sumProtein / totalDaysCount;
   const avgCarbs = sumCarbs / totalDaysCount;
   const avgFat = sumFat / totalDaysCount;
-  const avgWater = sumWater / totalDaysCount;
 
   const getTimelineString = () => {
     if (clearDaysOnly.length === 0) return '';
@@ -278,6 +274,14 @@ export default function AnalyticsDashboard() {
   return (
     <main className="min-h-screen bg-[#0B121F] text-white p-4 md:p-6 font-sans">
       <div className="max-w-5xl mx-auto space-y-6">
+        <section className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-[#00A86B]">Your nutrition at a glance</p>
+            <h1 className="text-2xl md:text-3xl font-black tracking-tight mt-1">Nutrition Analytics</h1>
+            <p className="text-sm text-gray-400 mt-1">Understand your daily intake, spot weekly patterns, and review monthly progress.</p>
+          </div>
+          <div className="text-xs text-gray-500">Based on your logged food entries</div>
+        </section>
         
         {/* Navigation header row */}
         <div className="flex flex-col lg:flex-row gap-4 justify-between items-center bg-[#121A2A] p-4 rounded-2xl border border-gray-800/60">
@@ -368,10 +372,10 @@ export default function AnalyticsDashboard() {
           </div>
 
           <div className="bg-[#121A2A] border border-gray-800/80 rounded-2xl p-4 space-y-1">
-            <p className="text-[10px] uppercase tracking-wider font-blue-400 flex items-center gap-1"><Droplet className="w-3 h-3 fill-current" /> Fluid Hydration</p>
-            <p className="text-2xl font-mono font-black text-white">{Math.round(avgWater)}ml <span className="text-xs text-gray-500">avg</span></p>
-            <p className="text-xs font-mono font-bold text-blue-400">Total: {(sumWater / 1000).toFixed(1)}L</p>
-            <p className="text-[10px] text-gray-500 mt-1">Tracked consumption volume</p>
+            <p className="text-[10px] uppercase tracking-wider font-bold text-gray-400">Logging consistency</p>
+            <p className="text-2xl font-mono font-black text-white">{trackedDays}<span className="text-xs text-gray-500"> / {clearDaysOnly.length} days</span></p>
+            <p className="text-xs font-mono font-bold text-cyan-300">{clearDaysOnly.length ? Math.round((trackedDays / clearDaysOnly.length) * 100) : 0}% days with food logged</p>
+            <p className="text-[10px] text-gray-500 mt-1">A day counts when at least one food entry is recorded.</p>
           </div>
         </div>
 
