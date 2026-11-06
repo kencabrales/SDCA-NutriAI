@@ -14,9 +14,20 @@ export async function GET(req) {
       ? { $or: [{ createdBy: userId }, { privacy: 'Public' }] }
       : { privacy: 'Public' };
 
-    const foods = await CustomFood.find(filter).sort({ createdAt: -1 }).lean();
+    const foods = await CustomFood.find(filter)
+  .sort({ createdAt: -1 })
+  .lean();
 
-    return NextResponse.json({ success: true, foods: foods || [] }, { status: 200 });
+const formattedFoods = foods.map(food => ({
+  ...food,
+  brandName: food.brandName || food.brand || null,
+}));
+
+    return NextResponse.json({
+  success: true,
+  foods: formattedFoods
+}, { status: 200 });
+
   } catch (error) {
     console.error("GET Custom-Food API Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -44,7 +55,7 @@ export async function POST(req) {
 
     const newCustomFood = await CustomFood.create({
       foodName: body.foodName,
-      brandName: body.brandName || null,
+      brandName: body.brandName || body.brand || null,
       servingSize: body.servingSize,
       amount: body.amount,
       unit: body.unit,

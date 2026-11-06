@@ -44,7 +44,7 @@ export async function GET(req) {
 
       return {
         foodName: item.foodName,
-        brand: item.brandName || 'Custom',
+        brand: item.brandName || item.brand || 'Custom',
         calories: item.calories,
         carbs: item.carbs,
         protein: item.protein,
