@@ -89,10 +89,7 @@ const MacroTooltip = ({ active, payload }) => {
           <div className="flex justify-between"><span className="text-gray-400">Fats:</span> <span className="font-mono font-bold text-[#8B5CF6]">{Math.round(data.fat)}g</span></div>
           <div className="flex justify-between mb-1.5"><span className="text-gray-400">Protein:</span> <span className="font-mono font-bold text-[#10B981]">{Math.round(data.protein)}g</span></div>
           
-          <div className="flex justify-between border-t border-gray-800/40 pt-1 text-[11px] font-bold text-blue-400">
-            <span className="flex items-center gap-1"><Droplet className="w-3 h-3 fill-current" /> Water:</span>
-            <span className="font-mono">{data.water} ml</span>
-          </div>
+>
         </div>
       </div>
     );
