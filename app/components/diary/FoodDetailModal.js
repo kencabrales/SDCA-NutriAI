@@ -23,6 +23,25 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
     pieces: 1,
   };
 
+  const normalizeServing = (amount, rawUnit) => {
+    const legacyUnit = String(rawUnit || 'g').toLowerCase();
+    const numericAmount = Number(amount) || 1;
+    if (['g', 'ml', 'pcs', 'serving'].includes(legacyUnit)) {
+      return { amount: numericAmount, unit: legacyUnit };
+    }
+    if (['pc', 'piece', 'pieces'].includes(legacyUnit)) {
+      return { amount: numericAmount, unit: 'pcs' };
+    }
+    if (['kg', 'oz', 'lb'].includes(legacyUnit)) {
+      return { amount: numericAmount * (GRAMS_PER_UNIT[legacyUnit] || 1), unit: 'g' };
+    }
+    if (['l', 'fl oz', 'cup', 'tbsp', 'tsp'].includes(legacyUnit)) {
+      return { amount: numericAmount * (GRAMS_PER_UNIT[legacyUnit] || 1), unit: 'ml' };
+    }
+    if (legacyUnit === 'meal') return { amount: numericAmount, unit: 'serving' };
+    return { amount: numericAmount, unit: 'g' };
+  };
+
   const [servings, setServings] = useState(1);
   const [unit, setUnit] = useState('g');
   const [showNutritionFacts, setShowNutritionFacts] = useState(false);
@@ -63,23 +82,23 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
         setUnit('serving');
       } else if (isEditing) {
         const initAmount = initialData.amount || 100;
-        const initUnit = initialData.unit || 'g';
+        const normalized = normalizeServing(initAmount, initialData.unit || 'g');
 
-        setInputValue(initAmount);
-        setUnit(initUnit);
+        setInputValue(Number(normalized.amount.toFixed(2)));
+        setUnit(normalized.unit);
         setServings(1);
-        const factor = GRAMS_PER_UNIT[initUnit] ?? 1;
-        setWeightInGrams(initAmount * factor);
+        const factor = GRAMS_PER_UNIT[normalized.unit] ?? 1;
+        setWeightInGrams(normalized.amount * factor);
             } else {
         const defaultAmount = Number(
           initialData?.defaultServingAmount || initialData?.amount || initialData?.servingAmount || 100
         );
-        const defaultUnit = initialData?.unit || 'g';
-        const defaultFactor = GRAMS_PER_UNIT[defaultUnit] ?? 1;
-        setWeightInGrams(defaultAmount * defaultFactor);
-        setInputValue(defaultAmount);
+        const normalized = normalizeServing(defaultAmount, initialData?.unit || 'g');
+        const defaultFactor = GRAMS_PER_UNIT[normalized.unit] ?? 1;
+        setWeightInGrams(normalized.amount * defaultFactor);
+        setInputValue(Number(normalized.amount.toFixed(2)));
         setServings(1);
-        setUnit(defaultUnit);
+        setUnit(normalized.unit);
       }
     }
   }, [initialData, isOpen, isEditing, isMeal]);
@@ -365,15 +384,7 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
                     className="bg-[#1C2638] border border-gray-800 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-[#00A86B]"
                   >
                     <option value="g">Grams (g)</option>
-                    <option value="oz">Ounces (oz)</option>
                     <option value="ml">Milliliters (ml)</option>
-                    <option value="cup">Cups</option>
-                    <option value="tbsp">Tablespoons (tbsp)</option>
-                    <option value="tsp">Teaspoons (tsp)</option>
-                    <option value="fl oz">Fluid Ounces (fl oz)</option>
-                    <option value="l">Liters (l)</option>
-                    <option value="kg">Kilograms (kg)</option>
-                    <option value="lb">Pounds (lb)</option>
                     <option value="pcs">Pieces (pcs)</option>
                     <option value="serving">Servings</option>
                   </select>
