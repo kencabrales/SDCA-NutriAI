@@ -1,7 +1,7 @@
 //hooks/useDashboardData.js
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   getTodayPH,
@@ -34,6 +34,8 @@ export function useDashboardData() {
   const [insightsMessage, setInsightsMessage] = useState('');
   const [insightsError, setInsightsError] = useState('');
   const [isLoadingInsights, setIsLoadingInsights] = useState(false);
+  const insightsRequestInFlight = useRef(false);
+  const savedInsightsLoadedForUser = useRef(null);
 
   // --- CALENDAR LOGIC (all via UTC-anchored calendar math — see lib/dateUtils.js) ---
   const weekDays = useMemo(() => {
@@ -110,19 +112,29 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
     }
   }, []);
 
-  const fetchInsights = useCallback(async (userId, { forceRefresh = false } = {}) => {
-    if (!userId) return;
-    setIsLoadingInsights(true);
-    setInsightsError('');
+  const fetchInsights = useCallback(async (
+    userId,
+    { forceRefresh = false, generate = true, silent = false } = {}
+  ) => {
+    if (!userId || insightsRequestInFlight.current) return;
+    insightsRequestInFlight.current = true;
+    if (!silent) setIsLoadingInsights(true);
+    if (!silent) setInsightsError('');
     try {
-      const params = new URLSearchParams({ userId: String(userId), generate: 'true' });
+      const params = new URLSearchParams({
+        userId: String(userId),
+        generate: generate ? 'true' : 'false',
+      });
       if (forceRefresh) params.set('refresh', 'true');
       const res = await fetch('/api/ai/insights?' + params.toString(), { cache: 'no-store' });
       const data = await res.json().catch(() => ({}));
 
-      setMealSuggestion(data.mealSuggestion || null);
-      setBehaviorInsight(data.behaviorInsight || null);
-      setHealthRisk(data.healthRisk || null);
+      // Keep already-rendered cards visible if a refresh fails.
+      if (res.ok) {
+        setMealSuggestion(data.mealSuggestion || null);
+        setBehaviorInsight(data.behaviorInsight || null);
+        setHealthRisk(data.healthRisk || null);
+      }
       setInsightsMessage(data.message || data.warning || '');
 
       if (!res.ok) {
@@ -130,10 +142,13 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
       }
     } catch (err) {
       console.error('Failed to load AI insights:', err);
-      setInsightsError(err?.message || 'Could not connect to the NutriAI analysis service.');
-      setInsightsMessage('');
+      if (!silent) {
+        setInsightsError(err?.message || 'Could not connect to the NutriAI analysis service.');
+        setInsightsMessage('');
+      }
     } finally {
-      setIsLoadingInsights(false);
+      insightsRequestInFlight.current = false;
+      if (!silent) setIsLoadingInsights(false);
     }
   }, []);
 
@@ -154,9 +169,18 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
         const parsedUser = JSON.parse(session);
     setUser(parsedUser);
 
-    fetchDashboardData(parsedUser.id || parsedUser._id, selectedDate);
+    const userId = parsedUser.id || parsedUser._id;
+    fetchDashboardData(userId, selectedDate);
+
+    // Restore the saved analysis without calling Gemini again.
+    const userKey = String(userId || '');
+    if (userKey && savedInsightsLoadedForUser.current !== userKey) {
+      savedInsightsLoadedForUser.current = userKey;
+      fetchInsights(userId, { generate: false, silent: true });
+    }
+
     setIsHydrated(true);
-  }, [router, selectedDate, fetchDashboardData]);
+  }, [router, selectedDate, fetchDashboardData, fetchInsights]);
 
   // --- RE-FETCH ON TAB FOCUS ---
   useEffect(() => {

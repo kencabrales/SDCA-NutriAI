@@ -11,6 +11,12 @@ import { getTodayPH, dateStringToUTCAnchor, addDaysUTC, utcAnchorToDateString } 
 const GENERATION_TIMEOUT_MS = 25000;
 export const maxDuration = 45;
 
+// Coalesce identical concurrent requests in this Node process.
+const activeDailyInsightGenerations =
+  globalThis.__nutriAIDailyInsightGenerations ||
+  (globalThis.__nutriAIDailyInsightGenerations = new Map());
+const TRANSIENT_FAILURE_COOLDOWN_MS = 30_000;
+
 function getLastNDates(count, endDate) {
   const anchor = dateStringToUTCAnchor(endDate);
   return Array.from({ length: count }, (_, index) => utcAnchorToDateString(addDaysUTC(anchor, -index)));
@@ -171,12 +177,48 @@ export async function GET(req) {
       return NextResponse.json(toPayload(cached, { cached: true }));
     }
 
+    if (
+      generateRequested &&
+      cached?.generationFingerprint === insightsFingerprint &&
+      cached?.generationRetryAfter &&
+      new Date(cached.generationRetryAfter).getTime() > Date.now()
+    ) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((new Date(cached.generationRetryAfter).getTime() - Date.now()) / 1000));
+      const warning = `Gemini is temporarily busy. NutriAI paused new generation attempts for ${retryAfterSeconds} more seconds to protect your usage allowance.`;
+      if (cached.mealSuggestion || cached.behaviorInsight || cached.healthRisk) {
+        return NextResponse.json(toPayload(cached, {
+          cached: true,
+          stale: cached.insightsFingerprint !== insightsFingerprint,
+          warning,
+          retryAfterSeconds,
+        }));
+      }
+      return NextResponse.json({
+        mealSuggestion: null, behaviorInsight: null, healthRisk: null, warning, retryAfterSeconds,
+      }, { status: 503, headers: { 'Retry-After': String(retryAfterSeconds) } });
+    }
+
     if (!generateRequested) {
-      return NextResponse.json(toPayload(cached, {
-        cached: Boolean(cached),
-        message: cached
+      const hasSavedInsight = Boolean(
+        cached?.mealSuggestion || cached?.behaviorInsight || cached?.healthRisk
+      );
+      const cooldownActive = Boolean(
+        cached?.generationFingerprint === insightsFingerprint &&
+        cached?.generationRetryAfter &&
+        new Date(cached.generationRetryAfter).getTime() > Date.now()
+      );
+      const retryAfterSeconds = cooldownActive
+        ? Math.max(1, Math.ceil((new Date(cached.generationRetryAfter).getTime() - Date.now()) / 1000))
+        : null;
+
+      return NextResponse.json(toPayload(hasSavedInsight ? cached : null, {
+        cached: hasSavedInsight,
+        message: hasSavedInsight
           ? 'Showing your saved analysis. Generate again only when you want a new review.'
-          : 'Select Generate Analysis when you are ready to use AI.',
+          : cooldownActive
+            ? `Gemini is temporarily busy. You can try generating again in ${retryAfterSeconds} seconds.`
+            : 'Select Generate Analysis when you are ready to use AI.',
+        ...(retryAfterSeconds ? { retryAfterSeconds } : {}),
       }));
     }
 
@@ -192,27 +234,65 @@ export async function GET(req) {
       'Last seven days (daily totals and up to eight food names per day):', JSON.stringify(compactHistory),
     ].join('\n\n');
 
+    const generationKey = `${userId}:${today}:${insightsFingerprint}`;
+    let generationPromise = activeDailyInsightGenerations.get(generationKey);
+    const joinedExistingGeneration = Boolean(generationPromise);
+
+    if (!generationPromise) {
+      generationPromise = (async () => {
+        const result = await withTimeout(
+          (abortSignal) => generateJSON(prompt, {
+            retries: 0,
+            userId,
+            feature: 'daily-insights',
+            maxOutputTokens: 260,
+            thinkingLevel: 'minimal',
+            fallbackModel: process.env.GEMINI_DAILY_INSIGHTS_FALLBACK_MODEL || null,
+            fallbackThinkingLevel: 'low',
+            fallbackDelayMs: 1000,
+            abortSignal,
+          }),
+          GENERATION_TIMEOUT_MS
+        );
+
+        const insight = {
+          mealSuggestion: typeof result.mealSuggestion === 'string' ? result.mealSuggestion : null,
+          behaviorInsight: typeof result.behaviorInsight === 'string' ? result.behaviorInsight : null,
+          healthRisk: typeof result.healthRisk === 'string' ? result.healthRisk : null,
+        };
+        if (!insight.mealSuggestion || !insight.behaviorInsight) {
+          throw new Error('Gemini returned an incomplete daily insight response.');
+        }
+
+        return AIInsight.findOneAndUpdate(
+          { userId, date: today },
+          {
+            $set: { ...insight, insightsFingerprint, generatedAt: new Date(), stale: false },
+            $unset: {
+              generationRetryAfter: 1,
+              generationErrorCode: 1,
+              generationFingerprint: 1,
+            },
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      })();
+      activeDailyInsightGenerations.set(generationKey, generationPromise);
+    }
+
     try {
-      const result = await withTimeout(
-        (abortSignal) => generateJSON(prompt, {
-          retries: 0, userId, feature: 'daily-insights',
-          maxOutputTokens: 260, thinkingLevel: 'minimal', abortSignal,
-        }),
-        GENERATION_TIMEOUT_MS
-      );
-      const insight = {
-        mealSuggestion: typeof result.mealSuggestion === 'string' ? result.mealSuggestion : null,
-        behaviorInsight: typeof result.behaviorInsight === 'string' ? result.behaviorInsight : null,
-        healthRisk: typeof result.healthRisk === 'string' ? result.healthRisk : null,
-      };
-      if (!insight.mealSuggestion || !insight.behaviorInsight) throw new Error('Gemini returned an incomplete daily insight response.');
-      const saved = await AIInsight.findOneAndUpdate(
-        { userId, date: today },
-        { ...insight, insightsFingerprint, generatedAt: new Date(), stale: false },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      );
-      return NextResponse.json(toPayload(saved, { cached: false }));
+      const saved = await generationPromise;
+      if (activeDailyInsightGenerations.get(generationKey) === generationPromise) {
+        activeDailyInsightGenerations.delete(generationKey);
+      }
+      return NextResponse.json(toPayload(saved, joinedExistingGeneration
+        ? { cached: true, message: 'A matching analysis was generated by another request.' }
+        : { cached: false }));
     } catch (generationError) {
+      if (activeDailyInsightGenerations.get(generationKey) === generationPromise) {
+        activeDailyInsightGenerations.delete(generationKey);
+      }
+
       const errorDetails = getGenerationErrorDetails(generationError);
       console.error('NutriAI insight generation failed:', {
         name: generationError?.name || null,
@@ -222,8 +302,6 @@ export async function GET(req) {
         cause: generationError?.cause?.message || null,
       });
 
-      // Dashboard and Diary can request the same daily analysis close together.
-      // If the other request saved it first, reuse that matching result.
       try {
         const latest = await AIInsight.findOne({ userId, date: today }).lean();
         if (latest?.insightsFingerprint === insightsFingerprint) {
@@ -236,12 +314,42 @@ export async function GET(req) {
         console.error('Could not check the latest NutriAI cache:', cacheReadError?.message || cacheReadError);
       }
 
-      if (cached) return NextResponse.json(toPayload(cached, { cached: true, stale: true, warning: 'A fresh AI analysis could not be generated. Showing your last saved analysis.' }));
       const { status: providerStatus, diagnostic, isTimeout, isAbort } = errorDetails;
+      const cooldownMs = providerStatus === 429
+        ? 60_000
+        : (isTimeout || [500, 502, 503, 504].includes(providerStatus) ? TRANSIENT_FAILURE_COOLDOWN_MS : 0);
+
+      if (cooldownMs > 0) {
+        try {
+          await AIInsight.findOneAndUpdate(
+            { userId, date: today },
+            {
+              $set: {
+                generationRetryAfter: new Date(Date.now() + cooldownMs),
+                generationErrorCode: String(providerStatus || (isTimeout ? 'TIMEOUT' : 'TRANSIENT_ERROR')).slice(0, 80),
+                generationFingerprint: insightsFingerprint,
+              },
+              $setOnInsert: { userId, date: today },
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+          );
+        } catch (cooldownError) {
+          console.error('Could not save the NutriAI retry cooldown:', cooldownError?.message || cooldownError);
+        }
+      }
+
+      if (cached && (cached.mealSuggestion || cached.behaviorInsight || cached.healthRisk)) {
+        return NextResponse.json(toPayload(cached, {
+          cached: true,
+          stale: cached.insightsFingerprint !== insightsFingerprint,
+          warning: 'A fresh AI analysis could not be generated. Showing your last saved analysis.',
+        }));
+      }
+
       const warning = /GEMINI_API_KEY is missing/i.test(diagnostic)
         ? 'NutriAI is not configured on the server yet. Please contact the administrator.'
         : isTimeout
-          ? 'Gemini is taking longer than expected to respond. Please wait a minute before trying again.'
+          ? 'Gemini is taking longer than expected to respond. Your last saved analysis is kept when available. Please try again after a short pause.'
           : providerStatus === 401 || providerStatus === 403 || /API_KEY_INVALID|INVALID_API_KEY|PERMISSION_DENIED/.test(diagnostic)
             ? 'The Gemini API key is invalid or does not have permission. Please contact the administrator.'
             : providerStatus === 404 || /MODEL_NOT_FOUND|NOT_FOUND/.test(diagnostic)
@@ -249,17 +357,27 @@ export async function GET(req) {
               : providerStatus === 400 || /INVALID_ARGUMENT|FAILED_PRECONDITION/.test(diagnostic)
                 ? 'Gemini rejected the generation settings. Please ask the administrator to verify the model and its supported options.'
                 : providerStatus === 429 || /RESOURCE_EXHAUSTED|QUOTA|RATE_LIMIT/.test(diagnostic)
-                  ? 'The shared Gemini free quota or rate limit has been reached. Please try again later.'
+                  ? 'The shared Gemini free quota or rate limit has been reached. NutriAI has paused new attempts briefly to avoid repeated requests.'
                   : providerStatus === 504 || /DEADLINE_EXCEEDED/.test(diagnostic)
                     ? 'Gemini could not finish the request in time. Please try again later.'
                     : providerStatus === 503 || /UNAVAILABLE|SERVICE_UNAVAILABLE|INTERNAL/.test(diagnostic)
-                      ? 'Gemini is temporarily unavailable. Please try again in a little while.'
+                      ? 'Gemini is temporarily unavailable. NutriAI has paused new attempts briefly to protect your usage allowance.'
                       : isAbort
                         ? 'The Gemini request was interrupted before it completed. Please try again.'
                         : providerStatus >= 500
                           ? 'Gemini is temporarily busy. Please try again in a little while.'
                           : 'NutriAI could not complete the analysis. Please ask the administrator to check the server logs.';
-      return NextResponse.json({ mealSuggestion: null, behaviorInsight: null, healthRisk: null, warning }, { status: 503 });
+
+      return NextResponse.json({
+        mealSuggestion: null,
+        behaviorInsight: null,
+        healthRisk: null,
+        warning,
+        retryAfterSeconds: cooldownMs ? Math.ceil(cooldownMs / 1000) : null,
+      }, {
+        status: 503,
+        ...(cooldownMs ? { headers: { 'Retry-After': String(Math.ceil(cooldownMs / 1000)) } } : {}),
+      });
     }
   } catch (error) {
     console.error('AI Insights API Error:', error);
