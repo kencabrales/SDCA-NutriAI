@@ -38,7 +38,8 @@ export async function GET(req) {
     await dbConnect();
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
-    const forceRefresh = searchParams.get('refresh') === 'true';
+    const generateRequested = searchParams.get('generate') === 'true';
+    const forceRefresh = false;
     if (!userId || !/^[a-f\d]{24}$/i.test(userId)) {
       return NextResponse.json({ error: 'A valid userId is required.' }, { status: 400 });
     }
@@ -90,6 +91,15 @@ export async function GET(req) {
       return NextResponse.json(toPayload(cached, { cached: true }));
     }
 
+    if (!generateRequested) {
+      return NextResponse.json(toPayload(cached, {
+        cached: Boolean(cached),
+        message: cached
+          ? 'Showing your saved analysis. Generate again only when you want a new review.'
+          : 'Select Generate Analysis when you are ready to use AI.',
+      }));
+    }
+
     const analysisDayStart = new Date(today + 'T00:00:00+08:00');
     const generationsToday = await AIUsageEvent.countDocuments({
       userId, feature: 'daily-insights', status: 'success',
@@ -114,19 +124,20 @@ export async function GET(req) {
       dailyTargets: { calories: user.targetCalories || null, protein: user.targetProtein || user.proteinGrams || null, carbs: user.targetCarbs || user.carbsGrams || null, fat: user.targetFat || user.fatGrams || null },
       dietaryPreferences: user.dietaryPreferences || user.dietType || user.dietaryRestrictions || null,
     };
+    const compactHistory = dailySummaries.map(({ date, calories, protein, carbs, fat, meals }) => ({
+      date, calories, protein, carbs, fat,
+      foods: meals.slice(0, 8).map(({ food, meal }) => ({ food, meal })),
+    }));
     const prompt = [
-      'You are NutriAI, a careful and supportive nutrition coach inside a food-tracking app.',
-      'Use ONLY the supplied user profile and food logs. Personalize recommendations to the user goals, body metrics, activity level, dietary preferences, foods already eaten today, and patterns across the last seven days.',
-      'Return ONLY valid JSON with exactly these keys:',
-      '{"mealSuggestion":"A practical next-meal or snack suggestion that complements today logged foods and remaining nutrition needs. Name suitable foods and explain briefly why they fit.","behaviorInsight":"One or two sentences describing a specific, evidence-based pattern from the last seven days. Refer to actual foods or numbers.","healthRisk":null}',
-      'Set healthRisk to a short, non-alarmist observation only when repeated logged data supports a meaningful nutrition concern; otherwise use null. Do not diagnose disease, infer medical conditions, shame the user, or invent missing information. If there are no logs today, suggest a reasonable next meal based on goals and recent history. Do not recommend extreme restriction or unsafe calorie targets.',
-      'User profile and goals:', JSON.stringify(profile, null, 2),
-      'Today food log (' + today + ', Philippine time):', JSON.stringify(todayTotals, null, 2),
-      'Food log history (last seven days):', JSON.stringify(dailySummaries, null, 2),
-    ].join('\n\n');
+      'You are NutriAI, a careful nutrition coach. Use only the supplied data; do not invent facts or diagnose.',
+      'Return ONLY JSON: {"mealSuggestion":"one concise next-meal idea with a brief reason","behaviorInsight":"one concise evidence-based observation using actual numbers","healthRisk":null}. Set healthRisk only for a repeated, clearly supported nutrition concern; otherwise null.',
+      'Profile and daily targets:', JSON.stringify(profile),
+      'Today totals and foods:', JSON.stringify(todayTotals),
+      'Last seven days (daily totals and up to eight food names per day):', JSON.stringify(compactHistory),
+    ].join('\\n\\n');
 
     try {
-      const result = await withTimeout(generateJSON(prompt, { retries: 0, userId, feature: 'daily-insights' }), GENERATION_TIMEOUT_MS);
+      const result = await withTimeout(generateJSON(prompt, { retries: 0, userId, feature: 'daily-insights', maxOutputTokens: 260 }), GENERATION_TIMEOUT_MS);
       const insight = {
         mealSuggestion: typeof result.mealSuggestion === 'string' ? result.mealSuggestion : null,
         behaviorInsight: typeof result.behaviorInsight === 'string' ? result.behaviorInsight : null,
