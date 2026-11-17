@@ -9,8 +9,9 @@ import AIMealUsage from '@/lib/AIMealUsage';
 import { generateJSON } from '@/lib/aiClient';
 import { recordAIUsage } from '@/lib/recordAIUsage';
 import { getTodayPH } from '@/lib/dateUtils';
+import { getDailyAIFeatureLimit } from '@/lib/aiLimits';
 
-const DAILY_GENERATION_LIMIT = 3;
+const DAILY_GENERATION_LIMIT = getDailyAIFeatureLimit();
 const COOLDOWN_MS = 60 * 1000;
 const VALID_MEALS = ['breakfast', 'lunch', 'dinner', 'snacks'];
 export const maxDuration = 45;
@@ -80,7 +81,7 @@ async function reserveGeneration(userId, date) {
     const count = Number(current?.requests) || 0;
     const lastRequest = current?.lastRequestedAt ? new Date(current.lastRequestedAt).getTime() : 0;
     if (count >= DAILY_GENERATION_LIMIT) {
-      return { allowed: false, status: 429, error: 'You have reached the 3 AI meal generations allowed today.', usage: usageInfo(count) };
+      return { allowed: false, status: 429, error: `You have reached the ${DAILY_GENERATION_LIMIT} AI meal generations allowed today.`, usage: usageInfo(count) };
     }
     if (lastRequest && now.getTime() - lastRequest < COOLDOWN_MS) {
       return { allowed: false, status: 429, error: 'Please wait 60 seconds before requesting another new AI suggestion.', usage: usageInfo(count) };
