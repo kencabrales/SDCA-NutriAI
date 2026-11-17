@@ -149,7 +149,7 @@ export default function AIUsageAdminPage() {
     { label: 'Cached responses', value: number(data.summary.cachedResponses), icon: Clock3, detail: 'No new Gemini generation' },
     { label: 'Failed requests', value: number(data.summary.failedRequests), icon: Activity, detail: 'Non-quota failures' },
     { label: 'Quota errors', value: number(data.summary.quotaErrors), icon: BrainCircuit, detail: 'Provider quota responses' },
-    { label: 'Tracked tokens', value: number(data.summary.actualTokens + Math.max(0, data.summary.estimatedTokens - data.summary.actualTokens)), icon: CheckCircle2, detail: 'Actual where recorded; estimates otherwise' },
+    { label: 'Tracked tokens', value: number(data.summary.trackedTokens), icon: CheckCircle2, detail: 'Actual where recorded; estimates otherwise' },
   ] : [];
 
   return (
