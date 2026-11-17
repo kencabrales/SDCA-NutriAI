@@ -9,7 +9,6 @@ import { generateJSON } from '@/lib/aiClient';
 import { recordAIUsage } from '@/lib/recordAIUsage';
 import { dateStringToUTCAnchor, utcAnchorToDateString, addDaysUTC, getTodayPH } from '@/lib/dateUtils';
 
-const CACHE_FRESH_MS = 24 * 60 * 60 * 1000; // a range's summary is valid for a full day once generated
 const GENERATION_TIMEOUT_MS = 8000;
 
 function normalizeMealType(raw) {
@@ -78,7 +77,6 @@ export async function GET(req) {
     const end = searchParams.get('end');
     const periodLabel = searchParams.get('periodLabel') || ''; // e.g. "weekly" — just for prompt phrasing
     const generateRequested = searchParams.get('generate') === 'true';
-    const forceRefresh = false;
 
     if (!userId || !start || !end) {
       return NextResponse.json({ error: 'userId, start, and end are required' }, { status: 400 });
@@ -86,7 +84,6 @@ export async function GET(req) {
 
     const rangeKey = `${start}_${end}`;
     const cached = await AIInsight.findOne({ userId, rangeKey }).lean();
-    const cacheAgeMs = cached ? Date.now() - new Date(cached.generatedAt).getTime() : Infinity;
 
     const user = await User.findById(userId).lean();
     if (!user) {
@@ -96,7 +93,7 @@ export async function GET(req) {
     const dailyTotals = await buildRangeSummary(userId, start, end);
     const summaryFingerprint = createHash('sha256').update(JSON.stringify(dailyTotals)).digest('hex');
 
-    if (cached && !forceRefresh && cacheAgeMs < CACHE_FRESH_MS && cached.summaryFingerprint === summaryFingerprint) {
+    if (cached && cached.summaryFingerprint === summaryFingerprint) {
       await recordAIUsage({ userId, feature: 'nutrition-summary-cache', status: 'cached' });
       return NextResponse.json({ nutritionSummary: cached.nutritionSummary, cached: true });
     }
@@ -117,7 +114,7 @@ export async function GET(req) {
       status: { $in: ['success', 'failed', 'quota'] },
       createdAt: { $gte: analysisDayStart },
     });
-    if (!forceRefresh && todayAnalyses >= 3) {
+    if (todayAnalyses >= 3) {
       return NextResponse.json({
         nutritionSummary: cached?.nutritionSummary || null,
         cached: Boolean(cached),
