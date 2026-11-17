@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useState, useMemo, useCallback } from 'react';
+import TermsAndConditions, { TERMS_VERSION } from './TermsAndConditions';
 import {
   User,
   Mail,
@@ -58,6 +59,7 @@ export default function RegisterModal({ isOpen, onClose, onSwitchToLogin }) {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   // Step 1 State
   const [accountForm, setAccountForm] = useState({
@@ -262,6 +264,11 @@ export default function RegisterModal({ isOpen, onClose, onSwitchToLogin }) {
       return;
     }
 
+    if (!termsAccepted) {
+      setError('You must agree to the Terms and Conditions before registering.');
+      return;
+    }
+
     setLoading(true);
     setError('');
 
@@ -281,6 +288,8 @@ export default function RegisterModal({ isOpen, onClose, onSwitchToLogin }) {
         username: `${accountForm.firstName.toLowerCase()}${accountForm.lastName.toLowerCase()}`,
         email: accountForm.email,
         password: accountForm.password,
+        termsAccepted,
+        termsVersion: TERMS_VERSION,
         dob: biometricsForm.dob,
         sex: biometricsForm.sex,
         weight: standardizedWeight,
@@ -664,10 +673,12 @@ export default function RegisterModal({ isOpen, onClose, onSwitchToLogin }) {
                 </div>
               </div>
 
+              <TermsAndConditions accepted={termsAccepted} onAcceptedChange={setTermsAccepted} />
+
               <div className="pt-3">
                 <button
                   type="submit"
-                  disabled={loading || !!dobError}
+                  disabled={loading || !!dobError || !termsAccepted}
                   className="w-full bg-[#00A86B] hover:bg-[#00945D] text-white font-bold py-3 rounded-xl transition-all disabled:opacity-50 text-xs uppercase tracking-wider flex items-center justify-center space-x-2"
                 >
                   <span>{loading ? 'Registering...' : 'Complete Registration'}</span>
