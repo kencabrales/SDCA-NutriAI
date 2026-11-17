@@ -8,8 +8,10 @@ import AIUsageEvent from '@/lib/AIUsageEvent';
 import { generateJSON } from '@/lib/aiClient';
 import { recordAIUsage } from '@/lib/recordAIUsage';
 import { dateStringToUTCAnchor, utcAnchorToDateString, addDaysUTC, getTodayPH } from '@/lib/dateUtils';
+import { getDailyAIFeatureLimit } from '@/lib/aiLimits';
 
 const GENERATION_TIMEOUT_MS = 8000;
+const DAILY_GENERATION_LIMIT = getDailyAIFeatureLimit();
 
 function normalizeMealType(raw) {
   const t = (raw || '').toLowerCase();
@@ -114,7 +116,7 @@ export async function GET(req) {
       status: { $in: ['success', 'failed', 'quota'] },
       createdAt: { $gte: analysisDayStart },
     });
-    if (todayAnalyses >= 3) {
+    if (todayAnalyses >= DAILY_GENERATION_LIMIT) {
       return NextResponse.json({
         nutritionSummary: cached?.nutritionSummary || null,
         cached: Boolean(cached),
