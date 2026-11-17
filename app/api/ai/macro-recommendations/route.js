@@ -14,6 +14,30 @@ const DAILY_GENERATION_LIMIT = 3;
 const COOLDOWN_MS = 60 * 1000;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const VALID_MEALS = ['breakfast', 'lunch', 'dinner', 'snacks'];
+export const maxDuration = 45;
+
+function publicAIError(error) {
+  const status = Number(error?.status || error?.response?.status);
+  const code = String(error?.code || '').toUpperCase();
+  const message = String(error?.message || '');
+
+  if (/GEMINI_API_KEY is missing/i.test(message)) {
+    return 'NutriAI is not configured on the server. Please contact the administrator.';
+  }
+  if (status === 401 || status === 403 || /API_KEY_INVALID|INVALID_API_KEY|PERMISSION_DENIED/.test(code + ' ' + message.toUpperCase())) {
+    return 'The Gemini API key is invalid or does not have permission. Please contact the administrator.';
+  }
+  if (status === 404 || /MODEL_NOT_FOUND|NOT_FOUND/.test(code + ' ' + message.toUpperCase())) {
+    return 'The configured Gemini model is unavailable. Please contact the administrator.';
+  }
+  if (status === 429 || /RESOURCE_EXHAUSTED|QUOTA|RATE_LIMIT/.test(code + ' ' + message.toUpperCase())) {
+    return 'The shared Gemini free quota or rate limit has been reached. Please try again later.';
+  }
+  if (status >= 500 || /SERVICE_UNAVAILABLE|INTERNAL/.test(code + ' ' + message.toUpperCase())) {
+    return 'Gemini is temporarily busy. Please try again in a little while.';
+  }
+  return 'The AI request failed. Please ask the administrator to check the Vercel function logs.';
+}
 
 function usageInfo(requests = 0) {
   return {
@@ -72,8 +96,13 @@ async function reserveGeneration(userId, date) {
 }
 
 export async function POST(req) {
+  let failedStep = 'database connection';
+  let reservedGeneration = false;
+  let reservedUserId = null;
+  let reservedDate = null;
   try {
     await connectToDatabase();
+    failedStep = 'reading the user and food-log data';
     const body = await req.json();
     const userId = body.userId;
     const requestedDate = body.date || getTodayPH();
@@ -145,6 +174,11 @@ export async function POST(req) {
       });
     }
 
+    failedStep = 'Gemini generation';
+    failedStep = 'Gemini generation';
+    reservedGeneration = true;
+    reservedUserId = userId;
+    reservedDate = usageDate;
     const prompt = `You are NutriAI, a practical nutrition assistant. Suggest exactly 3 realistic ${mealType} meal ideas for this user. Personalize to their goal, dietary preferences, allergies, today's remaining macros, and foods already logged. Do not repeat foods already logged or include allergens. Nutrition values are estimates, not exact measurements. Keep reasons under 20 words.
 
 Return only JSON:
@@ -157,6 +191,7 @@ Foods logged: ${JSON.stringify(foodHistory)}
 Possible saved recipes (per serving): ${JSON.stringify(recipes)}`;
 
     const ai = await generateJSON(prompt, { retries: 0, userId, feature: 'meal-recommendations' });
+    failedStep = 'saving the generated recommendations';
     const suggestions = Array.isArray(ai.suggestions)
       ? ai.suggestions.filter((item) => item && typeof item.name === 'string').slice(0, 3).map((item) => ({
           name: item.name.trim(),
@@ -175,12 +210,26 @@ Possible saved recipes (per serving): ${JSON.stringify(recipes)}`;
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
+    reservedGeneration = false;
     return NextResponse.json({
       success: true, cached: false, targets, consumed, deficit, suggestions,
       usage: reservation.usage,
     });
   } catch (error) {
-    console.error('AI Macro Recommendations Error:', error?.message || error);
-    return NextResponse.json({ success: false, error: 'Unable to generate meal recommendations right now. Please try again later.' }, { status: 503 });
+    console.error('AI Macro Recommendations Error:', { step: failedStep, status: error?.status || error?.response?.status, code: error?.code, message: error?.message || error });
+    if (reservedGeneration && reservedUserId && reservedDate) {
+      try {
+        await AIMealUsage.updateOne(
+          { userId: reservedUserId, date: reservedDate, requests: { $gt: 0 } },
+          { $inc: { requests: -1 }, $set: { lastRequestedAt: null } }
+        );
+      } catch (refundError) {
+        console.error('Could not release failed AI recommendation allowance:', refundError?.message || refundError);
+      }
+    }
+    const message = failedStep === 'Gemini generation'
+      ? publicAIError(error)
+      : 'NutriAI could not complete ' + failedStep + '. Please try again later.';
+    return NextResponse.json({ success: false, error: message }, { status: 503 });
   }
 }
