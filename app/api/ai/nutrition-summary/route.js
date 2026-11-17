@@ -60,12 +60,32 @@ function normalizeMealType(raw) {
   return 'snack';
 }
 
-function withTimeout(promise, ms) {
+function withTimeout(task, ms) {
+  const controller = new AbortController();
   let timer;
+
+  const generation = Promise.resolve()
+    .then(() => task(controller.signal))
+    .catch((error) => {
+      if (controller.signal.aborted) {
+        const timeoutError = new Error('AI generation timed out');
+        timeoutError.code = 'AI_GENERATION_TIMEOUT';
+        timeoutError.cause = error;
+        throw timeoutError;
+      }
+      throw error;
+    });
+
   const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error('AI generation timed out')), ms);
+    timer = setTimeout(() => {
+      controller.abort();
+      const timeoutError = new Error('AI generation timed out');
+      timeoutError.code = 'AI_GENERATION_TIMEOUT';
+      reject(timeoutError);
+    }, ms);
   });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+
+  return Promise.race([generation, timeout]).finally(() => clearTimeout(timer));
 }
 
 // Builds the same day-bucketed totals api/nutrition-analytics produces,
@@ -200,13 +220,14 @@ Remember: return ONLY the JSON object.`;
 
     try {
       const fallbackModel = process.env.GEMINI_FALLBACK_MODEL_ID || null;
-      const aiResult = await withTimeout(generateJSON(prompt, {
+      const aiResult = await withTimeout((abortSignal) => generateJSON(prompt, {
         retries: 0,
         userId,
         feature: 'nutrition-summary',
         maxOutputTokens: 180,
         fallbackModel,
         fallbackDelayMs: 1000,
+        abortSignal,
       }), GENERATION_TIMEOUT_MS);
 
       const saved = await AIInsight.findOneAndUpdate(
@@ -227,7 +248,10 @@ Remember: return ONLY the JSON object.`;
     } catch (genErr) {
       console.error('Nutrition summary generation failed or timed out:', genErr?.message || genErr);
       const providerStatus = getProviderStatus(genErr);
-      const retryAfter = getProviderRetryAfter(genErr);
+      const timeoutFailure = genErr?.code === 'AI_GENERATION_TIMEOUT' ||
+        /AI generation timed out/i.test(String(genErr?.message || ''));
+      const retryAfter = getProviderRetryAfter(genErr) ||
+        (timeoutFailure ? new Date(Date.now() + 60 * 1000) : null);
       const errorCode = getProviderCode(genErr);
       const quotaFailure = providerStatus === 429 || /RESOURCE_EXHAUSTED|QUOTA/.test(errorCode.toUpperCase());
 
@@ -255,7 +279,11 @@ Remember: return ONLY the JSON object.`;
           stale: true,
           warning: quotaFailure
             ? 'The Gemini free-tier quota for this model has been reached. Showing your last saved analysis.'
-            : 'A fresh analysis could not be generated. Showing your last saved analysis.',
+            : providerStatus === 503
+              ? 'Gemini is temporarily experiencing high demand. Showing your last saved analysis.'
+              : timeoutFailure
+                ? 'Gemini took too long to respond. Showing your last saved analysis; you can try again after a short pause.'
+                : 'A fresh analysis could not be generated. Showing your last saved analysis.',
           ...(retryAfter ? { retryAfter: retryAfter.toISOString() } : {}),
         });
       }
@@ -264,12 +292,14 @@ Remember: return ONLY the JSON object.`;
         ? 'The Gemini free-tier daily quota has been reached for the configured model. Please wait until the quota resets or configure an available fallback model.'
         : providerStatus === 503
           ? 'Gemini is temporarily experiencing high demand. Please try again later.'
-          : 'The period analysis could not be generated right now. Your nutrition charts and reports remain available.';
+          : timeoutFailure
+            ? 'Gemini did not respond within the analysis time limit. Please wait a minute before trying again. Your nutrition charts and reports remain available.'
+            : 'The period analysis could not be generated right now. Your nutrition charts and reports remain available.';
       return NextResponse.json({
         nutritionSummary: null,
         warning: message,
         ...(retryAfter ? { retryAfter: retryAfter.toISOString() } : {}),
-      }, { status: quotaFailure ? 429 : providerStatus === 503 ? 503 : 502 });
+      }, { status: quotaFailure ? 429 : providerStatus === 503 ? 503 : timeoutFailure ? 504 : 502 });
     }
   } catch (error) {
     console.error('Nutrition Summary AI Error:', error);
