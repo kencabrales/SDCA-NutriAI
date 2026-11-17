@@ -8,7 +8,49 @@ import { generateJSON } from '@/lib/aiClient';
 import { recordAIUsage } from '@/lib/recordAIUsage';
 import { dateStringToUTCAnchor, utcAnchorToDateString, addDaysUTC } from '@/lib/dateUtils';
 
-const GENERATION_TIMEOUT_MS = 8000;
+const GENERATION_TIMEOUT_MS = 20000;
+
+function getProviderStatus(error) {
+  const rawStatus = Number(error?.status || error?.response?.status);
+  if (rawStatus) return rawStatus;
+  const message = String(error?.message || '');
+  try {
+    const parsed = JSON.parse(message);
+    return Number(parsed?.error?.code || parsed?.code) || null;
+  } catch {
+    return null;
+  }
+}
+
+function getProviderRetryAfter(error) {
+  const message = String(error?.message || '');
+  try {
+    const parsed = JSON.parse(message);
+    const details = parsed?.error?.details || [];
+    const retryInfo = details.find((item) => String(item?.['@type'] || '').includes('RetryInfo'));
+    const retryDelay = retryInfo?.retryDelay;
+    if (retryDelay) {
+      const seconds = Number.parseFloat(String(retryDelay).replace(/s$/, ''));
+      if (Number.isFinite(seconds) && seconds > 0) return new Date(Date.now() + seconds * 1000);
+    }
+  } catch {
+    // Use conservative defaults when the provider omits RetryInfo.
+  }
+  const status = getProviderStatus(error);
+  if (status === 429) return new Date(Date.now() + 60 * 60 * 1000);
+  if (status === 503) return new Date(Date.now() + 60 * 1000);
+  return null;
+}
+
+function getProviderCode(error) {
+  const message = String(error?.message || '');
+  try {
+    const parsed = JSON.parse(message);
+    return String(parsed?.error?.status || error?.code || error?.name || 'GENERATION_ERROR');
+  } catch {
+    return String(error?.code || error?.name || 'GENERATION_ERROR');
+  }
+}
 
 function normalizeMealType(raw) {
   const t = (raw || '').toLowerCase();
@@ -92,18 +134,41 @@ export async function GET(req) {
     const dailyTotals = await buildRangeSummary(userId, start, end);
     const summaryFingerprint = createHash('sha256').update(JSON.stringify(dailyTotals)).digest('hex');
 
-    if (cached && cached.summaryFingerprint === summaryFingerprint) {
+    if (cached && cached.summaryFingerprint === summaryFingerprint && cached.nutritionSummary) {
       await recordAIUsage({ userId, feature: 'nutrition-summary-cache', status: 'cached' });
       return NextResponse.json({ nutritionSummary: cached.nutritionSummary, cached: true });
     }
     if (!generateRequested) {
+      const retryAt = cached?.summaryFailureFingerprint === summaryFingerprint
+        ? cached?.summaryRetryAfter
+        : null;
+      const cooldownActive = retryAt && new Date(retryAt).getTime() > Date.now();
       return NextResponse.json({
         nutritionSummary: cached?.nutritionSummary || null,
-        cached: Boolean(cached),
-        message: cached
+        cached: Boolean(cached?.nutritionSummary),
+        message: cached?.nutritionSummary
           ? 'Showing the saved analysis. Select Analyze this period only when you want a new review.'
-          : 'Select Analyze this period when you are ready to use AI.',
+          : cooldownActive
+            ? `AI analysis is temporarily paused until ${new Date(retryAt).toLocaleString('en-PH', { timeZone: 'Asia/Manila' })}.`
+            : 'Select Analyze this period when you are ready to use AI.',
+        ...(cooldownActive ? { retryAfter: new Date(retryAt).toISOString() } : {}),
       });
+    }
+
+    const retryAt = cached?.summaryFailureFingerprint === summaryFingerprint
+      ? cached?.summaryRetryAfter
+      : null;
+    if (retryAt && new Date(retryAt).getTime() > Date.now()) {
+      const retrySeconds = Math.max(1, Math.ceil((new Date(retryAt).getTime() - Date.now()) / 1000));
+      return NextResponse.json({
+        nutritionSummary: cached?.nutritionSummary || null,
+        cached: Boolean(cached?.nutritionSummary),
+        stale: Boolean(cached?.nutritionSummary),
+        warning: cached?.nutritionSummary
+          ? 'A new analysis is temporarily unavailable. Showing your last saved analysis.'
+          : `Gemini quota or availability limit reached. Please try again in about ${Math.ceil(retrySeconds / 3600)} hour(s).`,
+        retryAfter: new Date(retryAt).toISOString(),
+      }, { status: cached?.nutritionSummary ? 200 : 429 });
     }
 
     const daysWithData = dailyTotals.filter((d) => d.calories > 0);
@@ -134,7 +199,15 @@ ${JSON.stringify(dailyTotals, null, 2)}
 Remember: return ONLY the JSON object.`;
 
     try {
-      const aiResult = await withTimeout(generateJSON(prompt, { retries: 0, userId, feature: 'nutrition-summary', maxOutputTokens: 180 }), GENERATION_TIMEOUT_MS);
+      const fallbackModel = process.env.GEMINI_FALLBACK_MODEL_ID || null;
+      const aiResult = await withTimeout(generateJSON(prompt, {
+        retries: 0,
+        userId,
+        feature: 'nutrition-summary',
+        maxOutputTokens: 180,
+        fallbackModel,
+        fallbackDelayMs: 1000,
+      }), GENERATION_TIMEOUT_MS);
 
       const saved = await AIInsight.findOneAndUpdate(
         { userId, rangeKey },
@@ -152,16 +225,51 @@ Remember: return ONLY the JSON object.`;
 
       return NextResponse.json({ nutritionSummary: saved.nutritionSummary, cached: false });
     } catch (genErr) {
-      console.error('Nutrition summary generation failed or timed out:', genErr.message);
+      console.error('Nutrition summary generation failed or timed out:', genErr?.message || genErr);
+      const providerStatus = getProviderStatus(genErr);
+      const retryAfter = getProviderRetryAfter(genErr);
+      const errorCode = getProviderCode(genErr);
+      const quotaFailure = providerStatus === 429 || /RESOURCE_EXHAUSTED|QUOTA/.test(errorCode.toUpperCase());
 
-      if (cached) {
-        return NextResponse.json({ nutritionSummary: cached.nutritionSummary, cached: true, stale: true });
+      if (retryAfter) {
+        await AIInsight.findOneAndUpdate(
+          { userId, rangeKey },
+          {
+            $set: {
+              rangeKey,
+              rangeStart: start,
+              rangeEnd: end,
+              summaryRetryAfter: retryAfter,
+              summaryErrorCode: errorCode,
+              summaryFailureFingerprint: summaryFingerprint,
+            },
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
       }
 
+      if (cached?.nutritionSummary) {
+        return NextResponse.json({
+          nutritionSummary: cached.nutritionSummary,
+          cached: true,
+          stale: true,
+          warning: quotaFailure
+            ? 'The Gemini free-tier quota for this model has been reached. Showing your last saved analysis.'
+            : 'A fresh analysis could not be generated. Showing your last saved analysis.',
+          ...(retryAfter ? { retryAfter: retryAfter.toISOString() } : {}),
+        });
+      }
+
+      const message = quotaFailure
+        ? 'The Gemini free-tier daily quota has been reached for the configured model. Please wait until the quota resets or configure an available fallback model.'
+        : providerStatus === 503
+          ? 'Gemini is temporarily experiencing high demand. Please try again later.'
+          : 'The period analysis could not be generated right now. Your nutrition charts and reports remain available.';
       return NextResponse.json({
         nutritionSummary: null,
-        message: 'Summary temporarily unavailable — please try again shortly.',
-      });
+        warning: message,
+        ...(retryAfter ? { retryAfter: retryAfter.toISOString() } : {}),
+      }, { status: quotaFailure ? 429 : providerStatus === 503 ? 503 : 502 });
     }
   } catch (error) {
     console.error('Nutrition Summary AI Error:', error);
