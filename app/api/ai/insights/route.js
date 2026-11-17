@@ -196,7 +196,12 @@ export async function GET(req) {
       const result = await withTimeout(
         (abortSignal) => generateJSON(prompt, {
           retries: 0, userId, feature: 'daily-insights',
-          maxOutputTokens: 260, thinkingLevel: 'minimal', abortSignal,
+          maxOutputTokens: 260, thinkingLevel: 'minimal',
+          // Optional alternate model; only configured when verified as available
+          // to this Google AI Studio project.
+          fallbackModel: process.env.GEMINI_DAILY_INSIGHTS_FALLBACK_MODEL || null,
+          fallbackThinkingLevel: 'low',
+          abortSignal,
         }),
         GENERATION_TIMEOUT_MS
       );
