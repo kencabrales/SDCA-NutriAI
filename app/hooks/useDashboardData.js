@@ -115,7 +115,7 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
     setIsLoadingInsights(true);
     setInsightsError('');
     try {
-      const params = new URLSearchParams({ userId: String(userId) });
+      const params = new URLSearchParams({ userId: String(userId), generate: 'true' });
       if (forceRefresh) params.set('refresh', 'true');
       const res = await fetch('/api/ai/insights?' + params.toString(), { cache: 'no-store' });
       const data = await res.json().catch(() => ({}));
