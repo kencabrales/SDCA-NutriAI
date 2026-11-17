@@ -83,26 +83,38 @@ const fetchDailyLogs = useCallback(async (userId, dateStr) => {
 // every click. `forceRefresh` should only be true when a food log actually
 // changed for today; a plain page load/refresh leaves it false so the
 // backend serves its cached result instead of spending another AI call.
-const fetchMealSuggestion = useCallback(async (userId) => {
+const fetchMealSuggestion = useCallback(async (
+  userId,
+  { generate = true, silent = false } = {}
+) => {
   if (!userId) return;
-  setIsLoadingSuggestion(true);
-  setMealSuggestionError('');
-  setMealSuggestionMessage('');
+  if (!silent) {
+    setIsLoadingSuggestion(true);
+    setMealSuggestionError('');
+  }
   try {
-    const params = new URLSearchParams({ userId: String(userId), date: getTodayPH(), generate: 'true' });
+    const params = new URLSearchParams({
+      userId: String(userId),
+      date: getTodayPH(),
+      generate: generate ? 'true' : 'false',
+    });
     const res = await fetch('/api/ai/insights?' + params.toString(), { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
 
-    setMealSuggestion(data.mealSuggestion || null);
-    setMealSuggestionMessage(res.ok ? (data.message || '') : '');
-    if (!res.ok) {
-      setMealSuggestionError(data.error || data.warning || data.message || 'NutriAI could not generate a suggestion right now.');
+    // Page visits restore the saved suggestion without triggering Gemini.
+    if (res.ok) {
+      setMealSuggestion(data.mealSuggestion || null);
+      setMealSuggestionMessage(data.message || '');
+      setMealSuggestionError('');
+    } else {
+      setMealSuggestionError(data.error || data.warning || data.message || 'NutriAI could not load your saved suggestion.');
+      setMealSuggestionMessage('');
     }
   } catch (err) {
     console.error('Failed to load AI meal suggestion:', err);
     setMealSuggestionError(err?.message || 'Could not connect to the NutriAI service.');
   } finally {
-    setIsLoadingSuggestion(false);
+    if (!silent) setIsLoadingSuggestion(false);
   }
 }, []);
 
@@ -116,13 +128,17 @@ useEffect(() => {
   } else {
     const parsedUser = JSON.parse(session);
     setUser(parsedUser);
-    fetchDailyLogs(parsedUser.id || parsedUser._id, today);
+    const userId = parsedUser.id || parsedUser._id;
+    fetchDailyLogs(userId, today);
+
+    // Restore today's saved AI suggestion from MongoDB without generating a new response.
+    fetchMealSuggestion(userId, { generate: false, silent: true });
     
     const savedWater = localStorage.getItem(`water_${today}`);
     if (savedWater) setWaterAmount(parseInt(savedWater, 10));
     setIsHydrated(true);
   }
-}, [router, fetchDailyLogs]);
+}, [router, fetchDailyLogs, fetchMealSuggestion]);
 
   // Browsing the calendar only ever changes which day's LOGS you're looking
   // at. It never touches the AI suggestion — that stays pinned to today.
