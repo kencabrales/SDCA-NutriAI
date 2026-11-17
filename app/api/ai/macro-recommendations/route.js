@@ -5,13 +5,10 @@ import FoodLog from '@/lib/FoodLog';
 import User from '@/lib/User';
 import Recipe from '@/lib/Recipe';
 import AIMealRecommendation from '@/lib/AIMealRecommendation';
-import AIMealUsage from '@/lib/AIMealUsage';
 import { generateJSON } from '@/lib/aiClient';
 import { recordAIUsage } from '@/lib/recordAIUsage';
 import { getTodayPH } from '@/lib/dateUtils';
 
-const DAILY_GENERATION_LIMIT = 3;
-const COOLDOWN_MS = 60 * 1000;
 const VALID_MEALS = ['breakfast', 'lunch', 'dinner', 'snacks'];
 export const maxDuration = 45;
 
@@ -38,62 +35,6 @@ function publicAIError(error) {
   return 'The AI request failed. Please ask the administrator to check the Vercel function logs.';
 }
 
-function usageInfo(requests = 0) {
-  return {
-    dailyLimit: DAILY_GENERATION_LIMIT,
-    used: requests,
-    remaining: Math.max(0, DAILY_GENERATION_LIMIT - requests),
-  };
-}
-
-async function reserveGeneration(userId, date) {
-  const now = new Date();
-  const usageFilter = {
-    userId,
-    date,
-    requests: { $lt: DAILY_GENERATION_LIMIT },
-    $or: [
-      { lastRequestedAt: null },
-      { lastRequestedAt: { $lte: new Date(now.getTime() - COOLDOWN_MS) } },
-    ],
-  };
-
-  try {
-    const updated = await AIMealUsage.findOneAndUpdate(
-      usageFilter,
-      { $inc: { requests: 1 }, $set: { lastRequestedAt: now } },
-      { new: true }
-    );
-    if (updated) return { allowed: true, usage: usageInfo(updated.requests) };
-
-    let current = await AIMealUsage.findOne({ userId, date }).lean();
-    if (!current) {
-      try {
-        current = await AIMealUsage.create({ userId, date, requests: 1, lastRequestedAt: now });
-        return { allowed: true, usage: usageInfo(current.requests) };
-      } catch (error) {
-        if (error?.code !== 11000) throw error;
-        current = await AIMealUsage.findOne({ userId, date }).lean();
-      }
-    }
-
-    const count = Number(current?.requests) || 0;
-    const lastRequest = current?.lastRequestedAt ? new Date(current.lastRequestedAt).getTime() : 0;
-    if (count >= DAILY_GENERATION_LIMIT) {
-      return { allowed: false, status: 429, error: 'You have reached the 3 AI meal generations allowed today.', usage: usageInfo(count) };
-    }
-    if (lastRequest && now.getTime() - lastRequest < COOLDOWN_MS) {
-      return { allowed: false, status: 429, error: 'Please wait 60 seconds before requesting another new AI suggestion.', usage: usageInfo(count) };
-    }
-    return { allowed: false, status: 429, error: 'Another suggestion request is being processed. Please try again shortly.', usage: usageInfo(count) };
-  } catch (error) {
-    if (error?.code === 11000) {
-      return { allowed: false, status: 429, error: 'Another suggestion request is being processed. Please try again shortly.', usage: usageInfo(1) };
-    }
-    throw error;
-  }
-}
-
 export async function POST(req) {
   let failedStep = 'database connection';
   try {
@@ -102,7 +43,6 @@ export async function POST(req) {
     const body = await req.json();
     const userId = body.userId;
     const requestedDate = body.date || getTodayPH();
-    const usageDate = getTodayPH();
     const mealType = String(body.mealType || '').toLowerCase();
 
     if (!userId || !/^[a-f\d]{24}$/i.test(String(userId))) {
@@ -154,19 +94,9 @@ export async function POST(req) {
     const cached = await AIMealRecommendation.findOne({ userId, date: requestedDate, mealType, fingerprint }).lean();
     if (cached) {
       await recordAIUsage({ userId, feature: 'meal-recommendations-cache', status: 'cached' });
-      const usage = await AIMealUsage.findOne({ userId, date: usageDate }).lean();
       return NextResponse.json({
         success: true, cached: true, targets: cached.targets, consumed: cached.consumed,
         deficit: cached.deficit, suggestions: cached.suggestions,
-        usage: usageInfo(usage?.requests || 0),
-      });
-    }
-
-    const reservation = await reserveGeneration(userId, usageDate);
-    if (!reservation.allowed) {
-      return NextResponse.json({ success: false, error: reservation.error, usage: reservation.usage }, {
-        status: reservation.status,
-        headers: { 'Retry-After': '60' },
       });
     }
 
@@ -204,7 +134,6 @@ Possible saved recipes (per serving): ${JSON.stringify(recipes)}`;
 
     return NextResponse.json({
       success: true, cached: false, targets, consumed, deficit, suggestions,
-      usage: reservation.usage,
     });
   } catch (error) {
     console.error('AI Macro Recommendations Error:', { step: failedStep, status: error?.status || error?.response?.status, code: error?.code, message: error?.message || error });
