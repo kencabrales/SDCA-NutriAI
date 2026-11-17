@@ -237,7 +237,8 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
 const handleWaterAdd = async (amount) => {
   const uid = user?.id || user?._id;
   if (!uid || !Number.isFinite(Number(amount))) return;
-  const updated = Math.max(0, todayWater + Number(amount));
+  const previousWater = todayWater;
+  const updated = Math.max(0, previousWater + Number(amount));
   setTodayWater(updated);
   try {
     const res = await fetch('/api/water-log', {
@@ -254,7 +255,7 @@ const handleWaterAdd = async (amount) => {
     setTodayWater(Number(data.log?.amountMl) || 0);
   } catch (error) {
     console.error('Water logging failed:', error);
-    setTodayWater((current) => Math.max(0, current - Number(amount)));
+    setTodayWater(previousWater);
   }
 };
 
