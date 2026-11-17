@@ -89,7 +89,7 @@ const fetchMealSuggestion = useCallback(async (userId) => {
   setMealSuggestionError('');
   setMealSuggestionMessage('');
   try {
-    const params = new URLSearchParams({ userId: String(userId), date: getTodayPH() });
+    const params = new URLSearchParams({ userId: String(userId), date: getTodayPH(), generate: 'true' });
     const res = await fetch('/api/ai/insights?' + params.toString(), { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
 
