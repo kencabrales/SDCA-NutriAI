@@ -365,6 +365,7 @@ export default function NutritionTab({ user }) {
         start: rangeStart,
         end: rangeEnd,
         periodLabel: period,
+        generate: 'true',
       });
       const response = await fetch(`/api/ai/nutrition-summary?${params.toString()}`);
       const data = await response.json();

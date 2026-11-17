@@ -38,7 +38,7 @@ export default function AIUsageAdminPage() {
     { label: 'Cached responses', value: number(data.summary.cachedResponses), icon: Clock3, detail: 'Served without a Gemini call' },
     { label: 'Failed requests', value: number(data.summary.failedRequests), icon: Activity, detail: 'Non-quota failures' },
     { label: 'Quota errors', value: number(data.summary.quotaErrors), icon: BrainCircuit, detail: 'Gemini limit responses' },
-    { label: 'Estimated tokens', value: number(data.summary.estimatedTokens), icon: CheckCircle2, detail: 'Approx. characters ÷ 4' },
+    { label: 'Tokens used', value: number(data.summary.actualTokens || data.summary.estimatedTokens), icon: CheckCircle2, detail: data.summary.actualTokenEvents ? 'Actual Gemini counts where available' : 'Estimated from text length' },
   ] : [];
 
   return (
@@ -94,7 +94,7 @@ export default function AIUsageAdminPage() {
               </table>
             </div>
           </section>
-          <p className="text-[10px] text-gray-600">Token counts are estimates based on text length, not Gemini's official usage metadata. Monitoring starts after this feature is deployed; it does not reconstruct older requests.</p>
+          <p className="text-[10px] text-gray-600">Token totals use Gemini-reported usage when available and text-length estimates for older events. Monitoring does not reconstruct historical usage.</p>
         </>}
       </div>
     </main>

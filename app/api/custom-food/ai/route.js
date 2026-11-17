@@ -33,6 +33,7 @@ export async function POST(req) {
       config: {
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",
+        maxOutputTokens: 520,
         responseSchema: {
           type: "OBJECT",
           properties: {
@@ -60,7 +61,11 @@ export async function POST(req) {
     });
 
     const parsedData = JSON.parse(response.text);
-    await recordAIUsage({ userId, feature: 'custom-food-variations', status: 'success', inputText: targetPrompt, outputText: response.text || '' });
+    await recordAIUsage({
+      userId, feature: 'custom-food-variations', status: 'success',
+      inputText: targetPrompt, outputText: response.text || '',
+      usageMetadata: response.usageMetadata || null,
+    });
     return NextResponse.json({ success: true, variations: parsedData.variations || [] });
 
   } catch (error) {

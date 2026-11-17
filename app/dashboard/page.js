@@ -113,17 +113,17 @@ export default function Dashboard() {
       </div>
       <div>
         <h2 className="text-sm font-bold text-white">NutriAI Daily Analyst</h2>
-        <p className="mt-1 text-xs text-slate-400">Personalized observations from your recent food logs and nutrition goals.</p>
+        <p className="mt-1 text-xs text-slate-400">Generate on demand. Saved results are reused when your food logs have not changed.</p>
       </div>
     </div>
     <button
       type="button"
-      onClick={() => refreshInsights(user?.id || user?._id, { forceRefresh: true })}
+      onClick={() => refreshInsights(user?.id || user?._id)}
       disabled={isLoadingInsights}
       className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-cyan-800/70 bg-cyan-950/40 px-3 py-2 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-900/50 disabled:cursor-wait disabled:opacity-50"
     >
       <Sparkles className={`h-3.5 w-3.5 ${isLoadingInsights ? 'animate-pulse' : ''}`} />
-      {isLoadingInsights ? 'Analyzing…' : 'Refresh analysis'}
+      {isLoadingInsights ? 'Analyzing…' : 'Generate Analysis'}
     </button>
   </div>
 
@@ -164,7 +164,7 @@ export default function Dashboard() {
   )}
   {!isLoadingInsights && !insightsError && !insightsMessage && !mealSuggestion && !behaviorInsight && (
     <p className="rounded-xl border border-dashed border-slate-700 p-3 text-xs text-slate-400">
-      Your analyst will appear here when enough food-log data is available. Refresh after adding meals.
+      Generate an analysis when you are ready. NutriAI will reuse a saved result when your food logs have not changed.
     </p>
   )}
   <p className="text-[10px] text-slate-500">AI suggestions are general nutrition information, not medical advice. Availability depends on the shared Gemini service and account usage allowance.</p>

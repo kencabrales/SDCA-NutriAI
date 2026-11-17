@@ -31,6 +31,8 @@ export async function GET(request) {
     let failedRequests = 0;
     let quotaErrors = 0;
     let estimatedTokens = 0;
+    let actualTokens = 0;
+    let actualTokenEvents = 0;
 
     for (const event of events) {
       const day = new Intl.DateTimeFormat('en-CA', {
@@ -41,20 +43,23 @@ export async function GET(request) {
       bucket.cached += event.status === 'cached' ? 1 : 0;
       bucket.failed += event.status === 'failed' ? 1 : 0;
       bucket.quota += event.status === 'quota' ? 1 : 0;
-      bucket.tokens += Number(event.estimatedTotalTokens) || 0;
+      const eventTokens = event.actualTotalTokens ?? event.estimatedTotalTokens ?? 0;
+      bucket.tokens += Number(eventTokens) || 0;
+      if (event.actualTotalTokens !== null && event.actualTotalTokens !== undefined) actualTokenEvents++;
       days.set(day, bucket);
 
       if (event.status === 'cached') cachedResponses++;
       if (event.status === 'failed') failedRequests++;
       if (event.status === 'quota') quotaErrors++;
       estimatedTokens += Number(event.estimatedTotalTokens) || 0;
+      if (event.actualTotalTokens !== null && event.actualTotalTokens !== undefined) actualTokens += Number(event.actualTotalTokens) || 0;
 
       const key = event.userId ? String(event.userId) : 'unknown';
       const user = users.get(key) || { userId: key, requests: 0, cached: 0, failed: 0, tokens: 0 };
       if (event.status === 'cached') user.cached++;
       else user.requests++;
       if (event.status === 'failed' || event.status === 'quota') user.failed++;
-      user.tokens += Number(event.estimatedTotalTokens) || 0;
+      user.tokens += Number(event.actualTotalTokens ?? event.estimatedTotalTokens) || 0;
       users.set(key, user);
     }
 
@@ -75,6 +80,8 @@ export async function GET(request) {
         failedRequests,
         quotaErrors,
         estimatedTokens,
+        actualTokens,
+        actualTokenEvents,
       },
       daily: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)),
       perUser,
