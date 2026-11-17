@@ -83,14 +83,13 @@ const fetchDailyLogs = useCallback(async (userId, dateStr) => {
 // every click. `forceRefresh` should only be true when a food log actually
 // changed for today; a plain page load/refresh leaves it false so the
 // backend serves its cached result instead of spending another AI call.
-const fetchMealSuggestion = useCallback(async (userId, { forceRefresh = false } = {}) => {
+const fetchMealSuggestion = useCallback(async (userId) => {
   if (!userId) return;
   setIsLoadingSuggestion(true);
   setMealSuggestionError('');
   setMealSuggestionMessage('');
   try {
     const params = new URLSearchParams({ userId: String(userId), date: getTodayPH() });
-    if (forceRefresh) params.set('refresh', 'true');
     const res = await fetch('/api/ai/insights?' + params.toString(), { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
 
@@ -100,7 +99,7 @@ const fetchMealSuggestion = useCallback(async (userId, { forceRefresh = false } 
       setMealSuggestionError(data.error || data.warning || data.message || 'NutriAI could not generate a suggestion right now.');
     }
   } catch (err) {
-    console.error('Failed to fetch meal suggestion:', err);
+    console.error('Failed to load AI meal suggestion:', err);
     setMealSuggestionError(err?.message || 'Could not connect to the NutriAI service.');
   } finally {
     setIsLoadingSuggestion(false);
@@ -118,13 +117,12 @@ useEffect(() => {
     const parsedUser = JSON.parse(session);
     setUser(parsedUser);
     fetchDailyLogs(parsedUser.id || parsedUser._id, today);
-    fetchMealSuggestion(parsedUser.id || parsedUser._id);
     
     const savedWater = localStorage.getItem(`water_${today}`);
     if (savedWater) setWaterAmount(parseInt(savedWater, 10));
     setIsHydrated(true);
   }
-}, [router, fetchDailyLogs, fetchMealSuggestion]);
+}, [router, fetchDailyLogs]);
 
   // Browsing the calendar only ever changes which day's LOGS you're looking
   // at. It never touches the AI suggestion — that stays pinned to today.
@@ -410,16 +408,16 @@ if (res.ok) {
                 </div>
                 <div className="min-w-0">
                   <h4 className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-1">AI Suggestion · Today</h4>
-                  <p className="text-[11px] text-gray-500">A personalized next-meal idea based on your recent food logs.</p>
+                  <p className="text-[11px] text-gray-500">Generate only when you request it. A saved result is reused when your food logs have not changed.</p>
                 </div>
               </div>
               <button
                 type="button"
-                onClick={() => fetchMealSuggestion(user.id || user._id, { forceRefresh: true })}
+                onClick={() => fetchMealSuggestion(user.id || user._id)}
                 disabled={isLoadingSuggestion}
                 className="shrink-0 rounded-lg border border-emerald-800/60 bg-emerald-950/40 px-3 py-2 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-900/40 disabled:opacity-50"
               >
-                {isLoadingSuggestion ? 'Analyzing…' : 'Refresh'}
+                {isLoadingSuggestion ? 'Analyzing…' : 'Generate AI Suggestion'}
               </button>
             </div>
 
