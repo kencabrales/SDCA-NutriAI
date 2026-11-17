@@ -28,10 +28,21 @@ function withTimeout(task, ms) {
     }, ms);
   });
 
-  return Promise.race([
-    Promise.resolve().then(() => task(controller.signal)),
-    timeout,
-  ]).finally(() => clearTimeout(timer));
+  const generation = Promise.resolve()
+    .then(() => task(controller.signal))
+    .catch((error) => {
+      // The timeout controller aborts the SDK request. Normalize that SDK
+      // AbortError so it cannot hide the route's own timeout classification.
+      if (controller.signal.aborted) {
+        const timeoutError = new Error('Gemini generation timed out');
+        timeoutError.code = 'AI_GENERATION_TIMEOUT';
+        timeoutError.cause = error;
+        throw timeoutError;
+      }
+      throw error;
+    });
+
+  return Promise.race([generation, timeout]).finally(() => clearTimeout(timer));
 }
 
 function sum(logs, field) {
@@ -42,12 +53,59 @@ function toPayload(insight, extra = {}) {
   return { mealSuggestion: insight?.mealSuggestion || null, behaviorInsight: insight?.behaviorInsight || null, healthRisk: insight?.healthRisk || null, ...extra };
 }
 
+function getGenerationErrorDetails(error) {
+  const message = String(error?.message || '');
+  let parsedMessage = null;
+
+  try {
+    parsedMessage = JSON.parse(message);
+  } catch {
+    // The SDK may expose a plain-text message instead of a JSON error body.
+  }
+
+  const providerError = parsedMessage?.error || error?.error || error?.response?.data?.error || {};
+  const statusCandidates = [
+    error?.status,
+    error?.response?.status,
+    error?.cause?.status,
+    providerError?.code,
+    typeof error?.code === 'number' ? error.code : null,
+  ];
+
+  const status = statusCandidates
+    .map((value) => Number(value))
+    .find((value) => Number.isInteger(value) && value >= 400 && value <= 599) || null;
+
+  const code = String(
+    error?.code || error?.status || providerError?.status || error?.name || ''
+  ).toUpperCase();
+  const diagnostic = [
+    code,
+    String(error?.status || ''),
+    String(providerError?.status || ''),
+    String(error?.statusText || ''),
+    message,
+    String(error?.cause?.message || ''),
+  ].join(' ').toUpperCase();
+
+  return {
+    status,
+    code,
+    diagnostic,
+    isTimeout: code === 'AI_GENERATION_TIMEOUT' ||
+      /GEMINI GENERATION TIMED OUT|REQUESTTIMEOUT|DEADLINE_EXCEEDED|TIMEOUT/.test(diagnostic),
+    isAbort: error?.name === 'AbortError' || Number(error?.code) === 20 ||
+      /THIS OPERATION WAS ABORTED|ABORT_ERR/.test(diagnostic),
+  };
+}
+
 export async function GET(req) {
   try {
     await dbConnect();
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
     const generateRequested = searchParams.get('generate') === 'true';
+    const forceRefresh = searchParams.get('refresh') === 'true';
     if (!userId || !/^[a-f\d]{24}$/i.test(userId)) {
       return NextResponse.json({ error: 'A valid userId is required.' }, { status: 400 });
     }
@@ -91,9 +149,24 @@ export async function GET(req) {
       })),
     };
 
-    const insightsFingerprint = createHash('sha256').update(JSON.stringify(dailySummaries)).digest('hex');
+    const profile = {
+      age: user.age || null, sex: user.sex || user.gender || null,
+      height: user.height || user.heightInput || null,
+      currentWeight: user.currentWeight || user.weight || null, weightUnit: user.weightUnit || 'kg',
+      goalWeight: user.goalWeight || null,
+      goal: user.goal || user.nutritionalStrategy || user.weeklyGoal || 'maintain',
+      nutritionalStrategy: user.nutritionalStrategy || user.weeklyPace || user.weeklyGoal || 'maintain',
+      activityLevel: user.activityLevel || null,
+      dailyTargets: { calories: user.targetCalories || null, protein: user.targetProtein || user.proteinGrams || null, carbs: user.targetCarbs || user.carbsGrams || null, fat: user.targetFat || user.fatGrams || null },
+      dietaryPreferences: user.dietaryPreferences || user.dietType || user.dietaryRestrictions || null,
+    };
+
+    // Include the nutrition profile in the cache key so profile edits invalidate old advice.
+    const insightsFingerprint = createHash('sha256')
+      .update(JSON.stringify({ dailySummaries, profile }))
+      .digest('hex');
     const cached = await AIInsight.findOne({ userId, date: today }).lean();
-    if (cached && cached.insightsFingerprint === insightsFingerprint) {
+    if (!forceRefresh && cached && cached.insightsFingerprint === insightsFingerprint) {
       await recordAIUsage({ userId, feature: 'daily-insights-cache', status: 'cached' });
       return NextResponse.json(toPayload(cached, { cached: true }));
     }
@@ -107,17 +180,6 @@ export async function GET(req) {
       }));
     }
 
-    const profile = {
-      age: user.age || null, sex: user.sex || user.gender || null,
-      height: user.height || user.heightInput || null,
-      currentWeight: user.currentWeight || user.weight || null, weightUnit: user.weightUnit || 'kg',
-      goalWeight: user.goalWeight || null,
-      goal: user.goal || user.nutritionalStrategy || user.weeklyGoal || 'maintain',
-      nutritionalStrategy: user.nutritionalStrategy || user.weeklyPace || user.weeklyGoal || 'maintain',
-      activityLevel: user.activityLevel || null,
-      dailyTargets: { calories: user.targetCalories || null, protein: user.targetProtein || user.proteinGrams || null, carbs: user.targetCarbs || user.carbsGrams || null, fat: user.targetFat || user.fatGrams || null },
-      dietaryPreferences: user.dietaryPreferences || user.dietType || user.dietaryRestrictions || null,
-    };
     const compactHistory = dailySummaries.map(({ date, calories, protein, carbs, fat, meals }) => ({
       date, calories, protein, carbs, fat,
       foods: meals.slice(0, 8).map(({ food, meal }) => ({ food, meal })),
@@ -151,7 +213,14 @@ export async function GET(req) {
       );
       return NextResponse.json(toPayload(saved, { cached: false }));
     } catch (generationError) {
-      console.error('NutriAI insight generation failed:', generationError?.message || generationError);
+      const errorDetails = getGenerationErrorDetails(generationError);
+      console.error('NutriAI insight generation failed:', {
+        name: generationError?.name || null,
+        code: generationError?.code || null,
+        status: errorDetails.status,
+        message: generationError?.message || String(generationError),
+        cause: generationError?.cause?.message || null,
+      });
 
       // Dashboard and Diary can request the same daily analysis close together.
       // If the other request saved it first, reuse that matching result.
@@ -168,23 +237,28 @@ export async function GET(req) {
       }
 
       if (cached) return NextResponse.json(toPayload(cached, { cached: true, stale: true, warning: 'A fresh AI analysis could not be generated. Showing your last saved analysis.' }));
-      const detail = String(generationError?.message || '');
-      const code = String(generationError?.code || '').toUpperCase();
-      const providerStatus = Number(generationError?.status || generationError?.response?.status);
-      const diagnostic = code + ' ' + detail.toUpperCase();
-      const warning = /GEMINI_API_KEY is missing/i.test(detail)
+      const { status: providerStatus, diagnostic, isTimeout, isAbort } = errorDetails;
+      const warning = /GEMINI_API_KEY is missing/i.test(diagnostic)
         ? 'NutriAI is not configured on the server yet. Please contact the administrator.'
-        : code === 'AI_GENERATION_TIMEOUT' || /GEMINI GENERATION TIMED OUT|REQUESTTIMEOUT|TIMEOUT/.test(diagnostic)
+        : isTimeout
           ? 'Gemini is taking longer than expected to respond. Please wait a minute before trying again.'
           : providerStatus === 401 || providerStatus === 403 || /API_KEY_INVALID|INVALID_API_KEY|PERMISSION_DENIED/.test(diagnostic)
             ? 'The Gemini API key is invalid or does not have permission. Please contact the administrator.'
             : providerStatus === 404 || /MODEL_NOT_FOUND|NOT_FOUND/.test(diagnostic)
               ? 'The configured Gemini model is unavailable. Please contact the administrator.'
-              : providerStatus === 429 || /RESOURCE_EXHAUSTED|QUOTA|RATE_LIMIT/.test(diagnostic)
-                ? 'The shared Gemini free quota or rate limit has been reached. Please try again later.'
-                : providerStatus >= 500 || /SERVICE_UNAVAILABLE|INTERNAL/.test(diagnostic)
-                  ? 'Gemini is temporarily busy. Please try again in a little while.'
-                  : 'NutriAI could not complete the analysis. Please ask the administrator to check the server logs.';
+              : providerStatus === 400 || /INVALID_ARGUMENT|FAILED_PRECONDITION/.test(diagnostic)
+                ? 'Gemini rejected the generation settings. Please ask the administrator to verify the model and its supported options.'
+                : providerStatus === 429 || /RESOURCE_EXHAUSTED|QUOTA|RATE_LIMIT/.test(diagnostic)
+                  ? 'The shared Gemini free quota or rate limit has been reached. Please try again later.'
+                  : providerStatus === 504 || /DEADLINE_EXCEEDED/.test(diagnostic)
+                    ? 'Gemini could not finish the request in time. Please try again later.'
+                    : providerStatus === 503 || /UNAVAILABLE|SERVICE_UNAVAILABLE|INTERNAL/.test(diagnostic)
+                      ? 'Gemini is temporarily unavailable. Please try again in a little while.'
+                      : isAbort
+                        ? 'The Gemini request was interrupted before it completed. Please try again.'
+                        : providerStatus >= 500
+                          ? 'Gemini is temporarily busy. Please try again in a little while.'
+                          : 'NutriAI could not complete the analysis. Please ask the administrator to check the server logs.';
       return NextResponse.json({ mealSuggestion: null, behaviorInsight: null, healthRisk: null, warning }, { status: 503 });
     }
   } catch (error) {
