@@ -1,7 +1,7 @@
 //hooks/useDashboardData.js
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   getTodayPH,
@@ -34,6 +34,7 @@ export function useDashboardData() {
   const [insightsMessage, setInsightsMessage] = useState('');
   const [insightsError, setInsightsError] = useState('');
   const [isLoadingInsights, setIsLoadingInsights] = useState(false);
+  const insightsRequestInFlight = useRef(false);
 
   // --- CALENDAR LOGIC (all via UTC-anchored calendar math — see lib/dateUtils.js) ---
   const weekDays = useMemo(() => {
@@ -111,7 +112,8 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
   }, []);
 
   const fetchInsights = useCallback(async (userId, { forceRefresh = false } = {}) => {
-    if (!userId) return;
+    if (!userId || insightsRequestInFlight.current) return;
+    insightsRequestInFlight.current = true;
     setIsLoadingInsights(true);
     setInsightsError('');
     try {
@@ -120,9 +122,12 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
       const res = await fetch('/api/ai/insights?' + params.toString(), { cache: 'no-store' });
       const data = await res.json().catch(() => ({}));
 
-      setMealSuggestion(data.mealSuggestion || null);
-      setBehaviorInsight(data.behaviorInsight || null);
-      setHealthRisk(data.healthRisk || null);
+      // Keep already-rendered cards visible if a refresh fails.
+      if (res.ok) {
+        setMealSuggestion(data.mealSuggestion || null);
+        setBehaviorInsight(data.behaviorInsight || null);
+        setHealthRisk(data.healthRisk || null);
+      }
       setInsightsMessage(data.message || data.warning || '');
 
       if (!res.ok) {
@@ -133,6 +138,7 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
       setInsightsError(err?.message || 'Could not connect to the NutriAI analysis service.');
       setInsightsMessage('');
     } finally {
+      insightsRequestInFlight.current = false;
       setIsLoadingInsights(false);
     }
   }, []);
