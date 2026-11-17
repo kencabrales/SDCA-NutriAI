@@ -43,7 +43,6 @@ export default function Dashboard() {
     proteinGoal,
     mealBreakdown,
     displayDateHeader,
-    mealSuggestion,
     behaviorInsight,
     healthRisk,
     insightsMessage,
@@ -142,12 +141,6 @@ export default function Dashboard() {
       {insightsMessage}
     </div>
   )}
-  {mealSuggestion && (
-    <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/20 p-3">
-      <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-emerald-300">Next meal suggestion</p>
-      <p className="text-sm leading-relaxed text-slate-100">{mealSuggestion}</p>
-    </div>
-  )}
   {behaviorInsight && (
     <div className="rounded-xl border border-slate-700/70 bg-[#0b1422]/70 p-3">
       <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-cyan-300">Your nutrition patterns</p>
@@ -162,7 +155,7 @@ export default function Dashboard() {
       <p className="text-xs leading-relaxed text-amber-100">{healthRisk}</p>
     </div>
   )}
-  {!isLoadingInsights && !insightsError && !insightsMessage && !mealSuggestion && !behaviorInsight && (
+  {!isLoadingInsights && !insightsError && !insightsMessage && !behaviorInsight && !healthRisk && (
     <p className="rounded-xl border border-dashed border-slate-700 p-3 text-xs text-slate-400">
       Generate an analysis when you are ready. NutriAI will reuse a saved result when your food logs have not changed.
     </p>
