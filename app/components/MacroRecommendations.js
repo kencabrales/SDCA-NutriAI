@@ -16,7 +16,6 @@ export default function MacroRecommendations({ userId, selectedDate, onLogSucces
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [usage, setUsage] = useState(null);
   const [loggingId, setLoggingId] = useState(null);
   const [loggedItems, setLoggedItems] = useState({});
 
@@ -38,11 +37,9 @@ export default function MacroRecommendations({ userId, selectedDate, onLogSucces
       });
       const result = await res.json();
       if (!res.ok || !result.success) {
-        if (result.usage) setUsage(result.usage);
         throw new Error(result.error || 'Could not load meal recommendations.');
       }
       setData(result);
-      setUsage(result.usage || null);
     } catch (err) {
       console.error('Failed to load AI meal recommendations:', err);
       setError(err.message || 'AI recommendations are temporarily unavailable.');
@@ -132,11 +129,6 @@ export default function MacroRecommendations({ userId, selectedDate, onLogSucces
             </button>
           </div>
 
-          {usage && (
-            <p className="text-[11px] text-gray-500 mt-2">
-              {usage.remaining} of {usage.dailyLimit} new AI generations remaining today. Cached results do not use another generation.
-            </p>
-          )}
           {error && <p className="text-sm text-amber-300 mt-4">{error}</p>}
 
           {data && (
