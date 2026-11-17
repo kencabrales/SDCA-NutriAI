@@ -8,9 +8,10 @@ import AIUsageEvent from '@/lib/AIUsageEvent';
 import { generateJSON } from '@/lib/aiClient';
 import { recordAIUsage } from '@/lib/recordAIUsage';
 import { getTodayPH, dateStringToUTCAnchor, addDaysUTC, utcAnchorToDateString } from '@/lib/dateUtils';
+import { getDailyAIFeatureLimit } from '@/lib/aiLimits';
 
 const GENERATION_TIMEOUT_MS = 38000;
-const DAILY_GENERATION_LIMIT = 3;
+const DAILY_GENERATION_LIMIT = getDailyAIFeatureLimit();
 export const maxDuration = 45;
 
 function getLastNDates(count, endDate) {
