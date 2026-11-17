@@ -199,11 +199,26 @@ export async function GET(req) {
     }
 
     if (!generateRequested) {
-      return NextResponse.json(toPayload(cached, {
-        cached: Boolean(cached),
-        message: cached
+      const hasSavedInsight = Boolean(
+        cached?.mealSuggestion || cached?.behaviorInsight || cached?.healthRisk
+      );
+      const cooldownActive = Boolean(
+        cached?.generationFingerprint === insightsFingerprint &&
+        cached?.generationRetryAfter &&
+        new Date(cached.generationRetryAfter).getTime() > Date.now()
+      );
+      const retryAfterSeconds = cooldownActive
+        ? Math.max(1, Math.ceil((new Date(cached.generationRetryAfter).getTime() - Date.now()) / 1000))
+        : null;
+
+      return NextResponse.json(toPayload(hasSavedInsight ? cached : null, {
+        cached: hasSavedInsight,
+        message: hasSavedInsight
           ? 'Showing your saved analysis. Generate again only when you want a new review.'
-          : 'Select Generate Analysis when you are ready to use AI.',
+          : cooldownActive
+            ? `Gemini is temporarily busy. You can try generating again in ${retryAfterSeconds} seconds.`
+            : 'Select Generate Analysis when you are ready to use AI.',
+        ...(retryAfterSeconds ? { retryAfterSeconds } : {}),
       }));
     }
 
