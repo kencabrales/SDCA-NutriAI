@@ -126,7 +126,7 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
       setInsightsMessage(data.message || data.warning || '');
 
       if (!res.ok) {
-        setInsightsError(data.error || data.warning || 'NutriAI analysis is temporarily unavailable.');
+        setInsightsError(data.error || data.warning || data.message || 'NutriAI analysis is temporarily unavailable.');
       }
     } catch (err) {
       console.error('Failed to load AI insights:', err);
