@@ -28,8 +28,11 @@ export function useDashboardData() {
   const [todayLogs, setTodayLogs] = useState([]);
   const [todayWater, setTodayWater] = useState(0);
   const [todaySteps, setTodaySteps] = useState(0);
+  const [mealSuggestion, setMealSuggestion] = useState(null);
   const [behaviorInsight, setBehaviorInsight] = useState(null);
   const [healthRisk, setHealthRisk] = useState(null);
+  const [insightsMessage, setInsightsMessage] = useState('');
+  const [insightsError, setInsightsError] = useState('');
   const [isLoadingInsights, setIsLoadingInsights] = useState(false);
 
   // --- CALENDAR LOGIC (all via UTC-anchored calendar math — see lib/dateUtils.js) ---
@@ -107,22 +110,39 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
     }
   }, []);
 
-    const fetchInsights = useCallback(async (userId) => {
+  const fetchInsights = useCallback(async (userId, { forceRefresh = false } = {}) => {
     if (!userId) return;
     setIsLoadingInsights(true);
+    setInsightsError('');
     try {
-      const res = await fetch(`/api/ai/insights?userId=${userId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setBehaviorInsight(data.behaviorInsight || null);
-        setHealthRisk(data.healthRisk || null);
+      const params = new URLSearchParams({ userId: String(userId) });
+      if (forceRefresh) params.set('refresh', 'true');
+      const res = await fetch('/api/ai/insights?' + params.toString(), { cache: 'no-store' });
+      const data = await res.json().catch(() => ({}));
+
+      setMealSuggestion(data.mealSuggestion || null);
+      setBehaviorInsight(data.behaviorInsight || null);
+      setHealthRisk(data.healthRisk || null);
+      setInsightsMessage(data.message || data.warning || '');
+
+      if (!res.ok) {
+        setInsightsError(data.error || data.warning || 'NutriAI analysis is temporarily unavailable.');
       }
     } catch (err) {
-      console.error("Failed to load AI insights:", err);
+      console.error('Failed to load AI insights:', err);
+      setInsightsError(err?.message || 'Could not connect to the NutriAI analysis service.');
+      setInsightsMessage('');
     } finally {
       setIsLoadingInsights(false);
     }
   }, []);
+
+  const refreshDashboardData = useCallback(async () => {
+    const userId = user?.id || user?._id;
+    if (!userId) return;
+    await fetchDashboardData(userId, selectedDate);
+    await fetchInsights(userId);
+  }, [user, selectedDate, fetchDashboardData, fetchInsights]);
 
   // --- INITIAL HYDRATION & DATA FETCH ---
   useEffect(() => {
@@ -233,9 +253,14 @@ const handleWaterAdd = (amount) => {
     proteinGoal,
     mealBreakdown,
     displayDateHeader,
+    mealSuggestion,
     behaviorInsight,
     healthRisk,
+    insightsMessage,
+    insightsError,
     isLoadingInsights,
+    refreshInsights: fetchInsights,
+    refreshDashboardData,
     router
   };
 }
