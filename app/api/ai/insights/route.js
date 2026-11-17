@@ -38,7 +38,7 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
     const forceRefresh = searchParams.get('refresh') === 'true';
-    if (!userId || !/^[a-f\\d]{24}$/i.test(userId)) {
+    if (!userId || !/^[a-f\d]{24}$/i.test(userId)) {
       return NextResponse.json({ error: 'A valid userId is required.' }, { status: 400 });
     }
 
@@ -122,7 +122,7 @@ export async function GET(req) {
       'User profile and goals:', JSON.stringify(profile, null, 2),
       'Today food log (' + today + ', Philippine time):', JSON.stringify(todayTotals, null, 2),
       'Food log history (last seven days):', JSON.stringify(dailySummaries, null, 2),
-    ].join('\\n\\n');
+    ].join('\n\n');
 
     try {
       const result = await withTimeout(generateJSON(prompt, { retries: 0, userId, feature: 'daily-insights' }), GENERATION_TIMEOUT_MS);
