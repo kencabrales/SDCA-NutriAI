@@ -10,7 +10,7 @@ import { recordAIUsage } from '@/lib/recordAIUsage';
 import { getTodayPH, dateStringToUTCAnchor, addDaysUTC, utcAnchorToDateString } from '@/lib/dateUtils';
 
 const CACHE_FRESH_MS = 24 * 60 * 60 * 1000;
-const GENERATION_TIMEOUT_MS = 30000;
+const GENERATION_TIMEOUT_MS = 38000;
 const DAILY_GENERATION_LIMIT = 3;
 export const maxDuration = 45;
 
@@ -19,10 +19,22 @@ function getLastNDates(count, endDate) {
   return Array.from({ length: count }, (_, index) => utcAnchorToDateString(addDaysUTC(anchor, -index)));
 }
 
-function withTimeout(promise, ms) {
+function withTimeout(task, ms) {
+  const controller = new AbortController();
   let timer;
-  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Gemini generation timed out')), ms); });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      const error = new Error('Gemini generation timed out');
+      error.code = 'AI_GENERATION_TIMEOUT';
+      reject(error);
+    }, ms);
+  });
+
+  return Promise.race([
+    Promise.resolve().then(() => task(controller.signal)),
+    timeout,
+  ]).finally(() => clearTimeout(timer));
 }
 
 function sum(logs, field) {
@@ -137,7 +149,13 @@ export async function GET(req) {
     ].join('\n\n');
 
     try {
-      const result = await withTimeout(generateJSON(prompt, { retries: 0, userId, feature: 'daily-insights', maxOutputTokens: 260 }), GENERATION_TIMEOUT_MS);
+      const result = await withTimeout(
+        (abortSignal) => generateJSON(prompt, {
+          retries: 0, userId, feature: 'daily-insights',
+          maxOutputTokens: 260, abortSignal,
+        }),
+        GENERATION_TIMEOUT_MS
+      );
       const insight = {
         mealSuggestion: typeof result.mealSuggestion === 'string' ? result.mealSuggestion : null,
         behaviorInsight: typeof result.behaviorInsight === 'string' ? result.behaviorInsight : null,
@@ -174,15 +192,17 @@ export async function GET(req) {
       const diagnostic = code + ' ' + detail.toUpperCase();
       const warning = /GEMINI_API_KEY is missing/i.test(detail)
         ? 'NutriAI is not configured on the server yet. Please contact the administrator.'
-        : providerStatus === 401 || providerStatus === 403 || /API_KEY_INVALID|INVALID_API_KEY|PERMISSION_DENIED/.test(diagnostic)
-          ? 'The Gemini API key is invalid or does not have permission. Please contact the administrator.'
-          : providerStatus === 404 || /MODEL_NOT_FOUND|NOT_FOUND/.test(diagnostic)
-            ? 'The configured Gemini model is unavailable. Please contact the administrator.'
-            : providerStatus === 429 || /RESOURCE_EXHAUSTED|QUOTA|RATE_LIMIT/.test(diagnostic)
-              ? 'The shared Gemini free quota or rate limit has been reached. Please try again later.'
-              : providerStatus >= 500 || /SERVICE_UNAVAILABLE|INTERNAL/.test(diagnostic)
-                ? 'Gemini is temporarily busy. Please try again in a little while.'
-                : 'NutriAI could not complete the analysis. Please ask the administrator to check the Vercel function logs.';
+        : code === 'AI_GENERATION_TIMEOUT' || /GEMINI GENERATION TIMED OUT|REQUESTTIMEOUT|TIMEOUT/.test(diagnostic)
+          ? 'Gemini is taking longer than expected to respond. Please wait a minute before trying again.'
+          : providerStatus === 401 || providerStatus === 403 || /API_KEY_INVALID|INVALID_API_KEY|PERMISSION_DENIED/.test(diagnostic)
+            ? 'The Gemini API key is invalid or does not have permission. Please contact the administrator.'
+            : providerStatus === 404 || /MODEL_NOT_FOUND|NOT_FOUND/.test(diagnostic)
+              ? 'The configured Gemini model is unavailable. Please contact the administrator.'
+              : providerStatus === 429 || /RESOURCE_EXHAUSTED|QUOTA|RATE_LIMIT/.test(diagnostic)
+                ? 'The shared Gemini free quota or rate limit has been reached. Please try again later.'
+                : providerStatus >= 500 || /SERVICE_UNAVAILABLE|INTERNAL/.test(diagnostic)
+                  ? 'Gemini is temporarily busy. Please try again in a little while.'
+                  : 'NutriAI could not complete the analysis. Please ask the administrator to check the server logs.';
       return NextResponse.json({ mealSuggestion: null, behaviorInsight: null, healthRisk: null, warning }, { status: 503 });
     }
   } catch (error) {
