@@ -12,7 +12,6 @@ import { getTodayPH } from '@/lib/dateUtils';
 
 const DAILY_GENERATION_LIMIT = 3;
 const COOLDOWN_MS = 60 * 1000;
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const VALID_MEALS = ['breakfast', 'lunch', 'dinner', 'snacks'];
 export const maxDuration = 45;
 
@@ -97,9 +96,6 @@ async function reserveGeneration(userId, date) {
 
 export async function POST(req) {
   let failedStep = 'database connection';
-  let reservedGeneration = false;
-  let reservedUserId = null;
-  let reservedDate = null;
   try {
     await connectToDatabase();
     failedStep = 'reading the user and food-log data';
@@ -156,7 +152,7 @@ export async function POST(req) {
     const fingerprint = createHash('sha256').update(JSON.stringify({ requestedDate, mealType, profile, consumed, deficit, foodHistory, recipes })).digest('hex');
 
     const cached = await AIMealRecommendation.findOne({ userId, date: requestedDate, mealType, fingerprint }).lean();
-    if (cached && Date.now() - new Date(cached.generatedAt).getTime() < CACHE_TTL_MS) {
+    if (cached) {
       await recordAIUsage({ userId, feature: 'meal-recommendations-cache', status: 'cached' });
       const usage = await AIMealUsage.findOne({ userId, date: usageDate }).lean();
       return NextResponse.json({
@@ -175,9 +171,6 @@ export async function POST(req) {
     }
 
     failedStep = 'Gemini generation';
-    reservedGeneration = true;
-    reservedUserId = userId;
-    reservedDate = usageDate;
     const prompt = `You are NutriAI, a practical nutrition assistant. Suggest exactly 3 realistic ${mealType} meal ideas for this user. Personalize to their goal, dietary preferences, allergies, today's remaining macros, and foods already logged. Do not repeat foods already logged or include allergens. Nutrition values are estimates, not exact measurements. Keep reasons under 20 words.
 
 Return only JSON:
@@ -209,23 +202,12 @@ Possible saved recipes (per serving): ${JSON.stringify(recipes)}`;
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    reservedGeneration = false;
     return NextResponse.json({
       success: true, cached: false, targets, consumed, deficit, suggestions,
       usage: reservation.usage,
     });
   } catch (error) {
     console.error('AI Macro Recommendations Error:', { step: failedStep, status: error?.status || error?.response?.status, code: error?.code, message: error?.message || error });
-    if (reservedGeneration && reservedUserId && reservedDate) {
-      try {
-        await AIMealUsage.updateOne(
-          { userId: reservedUserId, date: reservedDate, requests: { $gt: 0 } },
-          { $inc: { requests: -1 }, $set: { lastRequestedAt: null } }
-        );
-      } catch (refundError) {
-        console.error('Could not release failed AI recommendation allowance:', refundError?.message || refundError);
-      }
-    }
     const message = failedStep === 'Gemini generation'
       ? publicAIError(error)
       : 'NutriAI could not complete ' + failedStep + '. Please try again later.';

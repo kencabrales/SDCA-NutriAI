@@ -9,7 +9,6 @@ import { generateJSON } from '@/lib/aiClient';
 import { recordAIUsage } from '@/lib/recordAIUsage';
 import { getTodayPH, dateStringToUTCAnchor, addDaysUTC, utcAnchorToDateString } from '@/lib/dateUtils';
 
-const CACHE_FRESH_MS = 24 * 60 * 60 * 1000;
 const GENERATION_TIMEOUT_MS = 38000;
 const DAILY_GENERATION_LIMIT = 3;
 export const maxDuration = 45;
@@ -51,7 +50,6 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
     const generateRequested = searchParams.get('generate') === 'true';
-    const forceRefresh = false;
     if (!userId || !/^[a-f\d]{24}$/i.test(userId)) {
       return NextResponse.json({ error: 'A valid userId is required.' }, { status: 400 });
     }
@@ -97,8 +95,7 @@ export async function GET(req) {
 
     const insightsFingerprint = createHash('sha256').update(JSON.stringify(dailySummaries)).digest('hex');
     const cached = await AIInsight.findOne({ userId, date: today }).lean();
-    const cacheAgeMs = cached ? Date.now() - new Date(cached.generatedAt).getTime() : Infinity;
-    if (cached && !forceRefresh && cached.insightsFingerprint === insightsFingerprint && cacheAgeMs < CACHE_FRESH_MS) {
+    if (cached && cached.insightsFingerprint === insightsFingerprint) {
       await recordAIUsage({ userId, feature: 'daily-insights-cache', status: 'cached' });
       return NextResponse.json(toPayload(cached, { cached: true }));
     }
@@ -114,14 +111,14 @@ export async function GET(req) {
 
     const analysisDayStart = new Date(today + 'T00:00:00+08:00');
     const generationsToday = await AIUsageEvent.countDocuments({
-      userId, feature: 'daily-insights', status: 'success',
+      userId, feature: 'daily-insights', status: { $in: ['success', 'failed', 'quota'] },
       createdAt: { $gte: analysisDayStart },
     });
     if (generationsToday >= DAILY_GENERATION_LIMIT) {
       if (cached) return NextResponse.json(toPayload(cached, { cached: true, stale: true, message: 'Your daily AI analyst limit has been reached. Showing your last saved analysis.' }));
       return NextResponse.json({
         mealSuggestion: null, behaviorInsight: null, healthRisk: null,
-        message: 'You have used all ' + DAILY_GENERATION_LIMIT + ' AI analyst generations for today. Your food diary and nutrition tracking remain available.',
+        message: 'You have used all ' + DAILY_GENERATION_LIMIT + ' AI analyst attempts for today. Your food diary and nutrition tracking remain available.',
       }, { status: 429 });
     }
 
