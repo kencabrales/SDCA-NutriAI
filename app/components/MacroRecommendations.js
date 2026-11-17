@@ -11,7 +11,7 @@ const MEAL_OPTIONS = [
 ];
 
 export default function MacroRecommendations({ userId, selectedDate, onLogSuccess }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [mealType, setMealType] = useState('dinner');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
