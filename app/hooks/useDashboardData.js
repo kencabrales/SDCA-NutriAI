@@ -81,8 +81,30 @@ export function useDashboardData() {
         setTodayLogs([]);
       }
 
-const savedWater = localStorage.getItem(`water_${userId}_${dateStr}`);
-setTodayWater(savedWater ? parseInt(savedWater, 10) : 0);
+try {
+  const waterRes = await fetch(`/api/water-log?userId=${encodeURIComponent(userId)}&date=${dateStr}`, { cache: 'no-store' });
+  const waterData = await waterRes.json().catch(() => ({}));
+  if (waterRes.ok && waterData.log) {
+    setTodayWater(Number(waterData.log.amountMl) || 0);
+  } else if (waterRes.ok) {
+    const legacyValue = localStorage.getItem(`water_${userId}_${dateStr}`);
+    const legacyAmount = Number.parseInt(legacyValue || '0', 10);
+    if (legacyAmount > 0) {
+      const migrateRes = await fetch('/api/water-log', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, date: dateStr, amountMl: legacyAmount, mode: 'set' }),
+      });
+      const migrated = await migrateRes.json().catch(() => ({}));
+      if (migrateRes.ok) {
+        setTodayWater(Number(migrated.log?.amountMl) || legacyAmount);
+        localStorage.removeItem(`water_${userId}_${dateStr}`);
+      } else setTodayWater(0);
+    } else setTodayWater(0);
+  } else setTodayWater(0);
+} catch (waterError) {
+  console.error('Failed to load water intake:', waterError);
+  setTodayWater(0);
+}
 
 const savedSteps = localStorage.getItem(`steps_${userId}_${dateStr}`);
 setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
@@ -212,11 +234,28 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
     });
   };
 
-const handleWaterAdd = (amount) => {
-  const updated = Math.max(0, todayWater + amount);
-  setTodayWater(updated);
+const handleWaterAdd = async (amount) => {
   const uid = user?.id || user?._id;
-  if (uid) localStorage.setItem(`water_${uid}_${selectedDate}`, updated.toString());
+  if (!uid || !Number.isFinite(Number(amount))) return;
+  const updated = Math.max(0, todayWater + Number(amount));
+  setTodayWater(updated);
+  try {
+    const res = await fetch('/api/water-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: uid, date: selectedDate, amountMl: Math.abs(Number(amount)),
+        mode: Number(amount) < 0 ? 'set' : 'increment',
+        ...(Number(amount) < 0 ? { amountMl: updated } : {}),
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not save water intake');
+    setTodayWater(Number(data.log?.amountMl) || 0);
+  } catch (error) {
+    console.error('Water logging failed:', error);
+    setTodayWater((current) => Math.max(0, current - Number(amount)));
+  }
 };
 
   const calorieGoal = Number(user?.targetCalories) || 2000;
