@@ -3,11 +3,15 @@ import { NextResponse } from 'next/server';
 import { GoogleGenAI } from '@google/genai';
 import { recordAIUsage } from '@/lib/recordAIUsage';
 
+const MODEL_ID = 'gemini-2.5-flash';
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export async function POST(req) {
+  let requestUserId = null;
+  let requestPrompt = '';
   try {
     const { foodName, brand, userId } = await req.json();
+    requestUserId = userId || null;
     
     if (!foodName || foodName.trim() === '') {
       return NextResponse.json({ success: false, error: 'Food name is required.' }, { status: 400 });
@@ -26,9 +30,10 @@ export async function POST(req) {
 
     const targetPrompt = `Generate exactly 3 logical nutritional variations for input: "${foodName}". ${brandContext}
     Ensure the brand is explicitly retained. Fill precise servingSize and unit fields matching real product guidelines.`;
+    requestPrompt = targetPrompt;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: MODEL_ID,
       contents: targetPrompt,
       config: {
         systemInstruction: systemInstruction,
@@ -62,7 +67,7 @@ export async function POST(req) {
 
     const parsedData = JSON.parse(response.text);
     await recordAIUsage({
-      userId, feature: 'custom-food-variations', status: 'success',
+      userId, feature: 'custom-food-variations', model: MODEL_ID, status: 'success',
       inputText: targetPrompt, outputText: response.text || '',
       usageMetadata: response.usageMetadata || null,
     });
@@ -70,7 +75,11 @@ export async function POST(req) {
 
   } catch (error) {
     const status = error?.status || error?.response?.status || error?.code;
-    await recordAIUsage({ feature: 'custom-food-variations', status: Number(status) === 429 || String(status).includes('RESOURCE_EXHAUSTED') ? 'quota' : 'failed', errorCode: status || error?.name || 'GENERATION_ERROR' });
+    await recordAIUsage({
+      userId: requestUserId, feature: 'custom-food-variations', model: MODEL_ID,
+      status: Number(status) === 429 || String(status).includes('RESOURCE_EXHAUSTED') ? 'quota' : 'failed',
+      inputText: requestPrompt, errorCode: status || error?.name || 'GENERATION_ERROR',
+    });
     console.error("AI VARIATION GENERATOR FAILURE:", error);
     return NextResponse.json({ success: false, error: "AI failed to generate options." }, { status: 500 });
   }
