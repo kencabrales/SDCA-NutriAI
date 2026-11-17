@@ -29,6 +29,8 @@ function FoodDiaryContent() {
   const [currentDate, setCurrentDate] = useState('');
   const [isHydrated, setIsHydrated] = useState(false);
   const [mealSuggestion, setMealSuggestion] = useState(null);
+  const [mealSuggestionMessage, setMealSuggestionMessage] = useState('');
+  const [mealSuggestionError, setMealSuggestionError] = useState('');
   const [isLoadingSuggestion, setIsLoadingSuggestion] = useState(false);
   
   // Modals and Food Editing State
@@ -81,18 +83,25 @@ const fetchDailyLogs = useCallback(async (userId, dateStr) => {
 // every click. `forceRefresh` should only be true when a food log actually
 // changed for today; a plain page load/refresh leaves it false so the
 // backend serves its cached result instead of spending another AI call.
-const fetchMealSuggestion = useCallback(async (userId) => {
+const fetchMealSuggestion = useCallback(async (userId, { forceRefresh = false } = {}) => {
   if (!userId) return;
   setIsLoadingSuggestion(true);
+  setMealSuggestionError('');
+  setMealSuggestionMessage('');
   try {
-    const todayStr = getTodayPH();
-    const res = await fetch(`/api/ai/insights?userId=${userId}&date=${todayStr}`);
-    if (res.ok) {
-      const data = await res.json();
-      setMealSuggestion(data.mealSuggestion || null);
+    const params = new URLSearchParams({ userId: String(userId), date: getTodayPH() });
+    if (forceRefresh) params.set('refresh', 'true');
+    const res = await fetch('/api/ai/insights?' + params.toString(), { cache: 'no-store' });
+    const data = await res.json().catch(() => ({}));
+
+    setMealSuggestion(data.mealSuggestion || null);
+    setMealSuggestionMessage(res.ok ? (data.message || '') : '');
+    if (!res.ok) {
+      setMealSuggestionError(data.error || data.warning || data.message || 'NutriAI could not generate a suggestion right now.');
     }
   } catch (err) {
-    console.error("Failed to fetch meal suggestion:", err);
+    console.error('Failed to fetch meal suggestion:', err);
+    setMealSuggestionError(err?.message || 'Could not connect to the NutriAI service.');
   } finally {
     setIsLoadingSuggestion(false);
   }
@@ -391,23 +400,45 @@ if (res.ok) {
           </div>
         </div>
 
-        {/* AI Suggestion only ever reflects TODAY — shown regardless of which
-            day you're browsing in the calendar above, so it never appears to
-            "follow" the date picker. */}
-        {(isLoadingSuggestion || mealSuggestion) && (
-          <div className="bg-gradient-to-br from-emerald-950/40 to-[#121A2A] border border-emerald-800/40 rounded-2xl p-4 flex items-start gap-3">
-            <div className="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex-shrink-0 mt-0.5">
-              <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+        {/* DAILY AI SUGGESTION — always visible, with explicit empty/error states */}
+        {user && (
+          <section className="bg-gradient-to-br from-emerald-950/40 to-[#121A2A] border border-emerald-800/40 rounded-2xl p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex-shrink-0 mt-0.5">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                </div>
+                <div className="min-w-0">
+                  <h4 className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-1">AI Suggestion · Today</h4>
+                  <p className="text-[11px] text-gray-500">A personalized next-meal idea based on your recent food logs.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => fetchMealSuggestion(user.id || user._id, { forceRefresh: true })}
+                disabled={isLoadingSuggestion}
+                className="shrink-0 rounded-lg border border-emerald-800/60 bg-emerald-950/40 px-3 py-2 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-900/40 disabled:opacity-50"
+              >
+                {isLoadingSuggestion ? 'Analyzing…' : 'Refresh'}
+              </button>
             </div>
-            <div>
-              <h4 className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-1">AI Suggestion &middot; Today</h4>
-              {isLoadingSuggestion ? (
-                <p className="text-xs text-gray-500 font-mono">Thinking...</p>
-              ) : (
-                <p className="text-xs text-gray-300 leading-relaxed">{mealSuggestion}</p>
-              )}
-            </div>
-          </div>
+
+            {isLoadingSuggestion && (
+              <p className="mt-3 rounded-lg bg-[#0B121F]/60 p-3 text-xs text-gray-300" role="status">NutriAI is reviewing your recent food logs…</p>
+            )}
+            {mealSuggestionError && (
+              <p className="mt-3 rounded-lg border border-amber-700/40 bg-amber-950/20 p-3 text-xs leading-relaxed text-amber-200" role="alert">{mealSuggestionError}</p>
+            )}
+            {mealSuggestionMessage && !mealSuggestionError && (
+              <p className="mt-3 rounded-lg border border-gray-700/70 bg-[#0B121F]/60 p-3 text-xs leading-relaxed text-gray-300" role="status">{mealSuggestionMessage}</p>
+            )}
+            {mealSuggestion && (
+              <p className="mt-3 rounded-lg bg-[#0B121F]/60 p-3 text-xs leading-relaxed text-gray-200">{mealSuggestion}</p>
+            )}
+            {!isLoadingSuggestion && !mealSuggestion && !mealSuggestionError && !mealSuggestionMessage && (
+              <p className="mt-3 rounded-lg border border-dashed border-gray-700 p-3 text-xs text-gray-400">Your personalized suggestion will appear here when your recent food logs are available.</p>
+            )}
+          </section>
         )}
 
         {user && (
