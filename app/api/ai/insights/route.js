@@ -4,13 +4,11 @@ import dbConnect from '@/lib/mongodb';
 import FoodLog from '@/lib/FoodLog';
 import User from '@/lib/User';
 import AIInsight from '@/lib/AIInsight';
-import AIUsageEvent from '@/lib/AIUsageEvent';
 import { generateJSON } from '@/lib/aiClient';
 import { recordAIUsage } from '@/lib/recordAIUsage';
 import { getTodayPH, dateStringToUTCAnchor, addDaysUTC, utcAnchorToDateString } from '@/lib/dateUtils';
 
 const GENERATION_TIMEOUT_MS = 38000;
-const DAILY_GENERATION_LIMIT = 3;
 export const maxDuration = 45;
 
 function getLastNDates(count, endDate) {
@@ -107,19 +105,6 @@ export async function GET(req) {
           ? 'Showing your saved analysis. Generate again only when you want a new review.'
           : 'Select Generate Analysis when you are ready to use AI.',
       }));
-    }
-
-    const analysisDayStart = new Date(today + 'T00:00:00+08:00');
-    const generationsToday = await AIUsageEvent.countDocuments({
-      userId, feature: 'daily-insights', status: { $in: ['success', 'failed', 'quota'] },
-      createdAt: { $gte: analysisDayStart },
-    });
-    if (generationsToday >= DAILY_GENERATION_LIMIT) {
-      if (cached) return NextResponse.json(toPayload(cached, { cached: true, stale: true, message: 'Your daily AI analyst limit has been reached. Showing your last saved analysis.' }));
-      return NextResponse.json({
-        mealSuggestion: null, behaviorInsight: null, healthRisk: null,
-        message: 'You have used all ' + DAILY_GENERATION_LIMIT + ' AI analyst attempts for today. Your food diary and nutrition tracking remain available.',
-      }, { status: 429 });
     }
 
     const profile = {
