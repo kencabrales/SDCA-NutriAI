@@ -12,6 +12,7 @@ import { getTodayPH, dateStringToUTCAnchor, addDaysUTC, utcAnchorToDateString } 
 const CACHE_FRESH_MS = 24 * 60 * 60 * 1000;
 const GENERATION_TIMEOUT_MS = 30000;
 const DAILY_GENERATION_LIMIT = 3;
+export const maxDuration = 45;
 
 function getLastNDates(count, endDate) {
   const anchor = dateStringToUTCAnchor(endDate);
@@ -91,7 +92,7 @@ export async function GET(req) {
 
     const analysisDayStart = new Date(today + 'T00:00:00+08:00');
     const generationsToday = await AIUsageEvent.countDocuments({
-      userId, feature: 'daily-insights', status: { $in: ['success', 'failed', 'quota'] },
+      userId, feature: 'daily-insights', status: 'success',
       createdAt: { $gte: analysisDayStart },
     });
     if (generationsToday >= DAILY_GENERATION_LIMIT) {
@@ -140,13 +141,37 @@ export async function GET(req) {
       return NextResponse.json(toPayload(saved, { cached: false }));
     } catch (generationError) {
       console.error('NutriAI insight generation failed:', generationError?.message || generationError);
+
+      // Dashboard and Diary can request the same daily analysis close together.
+      // If the other request saved it first, reuse that matching result.
+      try {
+        const latest = await AIInsight.findOne({ userId, date: today }).lean();
+        if (latest?.insightsFingerprint === insightsFingerprint) {
+          return NextResponse.json(toPayload(latest, {
+            cached: true,
+            message: 'Showing the latest analysis for your current food logs.',
+          }));
+        }
+      } catch (cacheReadError) {
+        console.error('Could not check the latest NutriAI cache:', cacheReadError?.message || cacheReadError);
+      }
+
       if (cached) return NextResponse.json(toPayload(cached, { cached: true, stale: true, warning: 'A fresh AI analysis could not be generated. Showing your last saved analysis.' }));
       const detail = String(generationError?.message || '');
+      const code = String(generationError?.code || '').toUpperCase();
+      const providerStatus = Number(generationError?.status || generationError?.response?.status);
+      const diagnostic = code + ' ' + detail.toUpperCase();
       const warning = /GEMINI_API_KEY is missing/i.test(detail)
         ? 'NutriAI is not configured on the server yet. Please contact the administrator.'
-        : /429|quota|RESOURCE_EXHAUSTED/i.test(detail)
-          ? 'Gemini is temporarily out of free usage. Please try again later.'
-          : 'NutriAI is temporarily unavailable. Your food logs and nutrition tracking are unaffected.';
+        : providerStatus === 401 || providerStatus === 403 || /API_KEY_INVALID|INVALID_API_KEY|PERMISSION_DENIED/.test(diagnostic)
+          ? 'The Gemini API key is invalid or does not have permission. Please contact the administrator.'
+          : providerStatus === 404 || /MODEL_NOT_FOUND|NOT_FOUND/.test(diagnostic)
+            ? 'The configured Gemini model is unavailable. Please contact the administrator.'
+            : providerStatus === 429 || /RESOURCE_EXHAUSTED|QUOTA|RATE_LIMIT/.test(diagnostic)
+              ? 'The shared Gemini free quota or rate limit has been reached. Please try again later.'
+              : providerStatus >= 500 || /SERVICE_UNAVAILABLE|INTERNAL/.test(diagnostic)
+                ? 'Gemini is temporarily busy. Please try again in a little while.'
+                : 'NutriAI could not complete the analysis. Please ask the administrator to check the Vercel function logs.';
       return NextResponse.json({ mealSuggestion: null, behaviorInsight: null, healthRisk: null, warning }, { status: 503 });
     }
   } catch (error) {
