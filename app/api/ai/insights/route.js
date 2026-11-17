@@ -8,7 +8,7 @@ import { generateJSON } from '@/lib/aiClient';
 import { recordAIUsage } from '@/lib/recordAIUsage';
 import { getTodayPH, dateStringToUTCAnchor, addDaysUTC, utcAnchorToDateString } from '@/lib/dateUtils';
 
-const GENERATION_TIMEOUT_MS = 38000;
+const GENERATION_TIMEOUT_MS = 25000;
 export const maxDuration = 45;
 
 function getLastNDates(count, endDate) {
@@ -134,7 +134,7 @@ export async function GET(req) {
       const result = await withTimeout(
         (abortSignal) => generateJSON(prompt, {
           retries: 0, userId, feature: 'daily-insights',
-          maxOutputTokens: 260, abortSignal,
+          maxOutputTokens: 260, thinkingLevel: 'minimal', abortSignal,
         }),
         GENERATION_TIMEOUT_MS
       );
