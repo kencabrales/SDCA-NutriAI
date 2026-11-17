@@ -83,20 +83,21 @@ const fetchDailyLogs = useCallback(async (userId, dateStr) => {
 // every click. `forceRefresh` should only be true when a food log actually
 // changed for today; a plain page load/refresh leaves it false so the
 // backend serves its cached result instead of spending another AI call.
-const fetchMealSuggestion = useCallback(async (userId) => {
+const fetchMealSuggestion = useCallback(async (userId, { forceRefresh = false } = {}) => {
   if (!userId) return;
   setIsLoadingSuggestion(true);
   setMealSuggestionError('');
   setMealSuggestionMessage('');
   try {
     const params = new URLSearchParams({ userId: String(userId), date: getTodayPH() });
+    if (forceRefresh) params.set('refresh', 'true');
     const res = await fetch('/api/ai/insights?' + params.toString(), { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
 
     setMealSuggestion(data.mealSuggestion || null);
-    setMealSuggestionMessage(data.message || '');
+    setMealSuggestionMessage(res.ok ? (data.message || '') : '');
     if (!res.ok) {
-      setMealSuggestionError(data.error || data.warning || 'NutriAI could not generate a suggestion right now.');
+      setMealSuggestionError(data.error || data.warning || data.message || 'NutriAI could not generate a suggestion right now.');
     }
   } catch (err) {
     console.error('Failed to fetch meal suggestion:', err);
@@ -414,7 +415,7 @@ if (res.ok) {
               </div>
               <button
                 type="button"
-                onClick={() => fetchMealSuggestion(user.id || user._id)}
+                onClick={() => fetchMealSuggestion(user.id || user._id, { forceRefresh: true })}
                 disabled={isLoadingSuggestion}
                 className="shrink-0 rounded-lg border border-emerald-800/60 bg-emerald-950/40 px-3 py-2 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-900/40 disabled:opacity-50"
               >
