@@ -63,7 +63,7 @@ function getGenerationErrorDetails(error) {
     // The SDK may expose a plain-text message instead of a JSON error body.
   }
 
-  const providerError = parsedMessage?.error || error?.error || {};
+  const providerError = parsedMessage?.error || error?.error || error?.response?.data?.error || {};
   const statusCandidates = [
     error?.status,
     error?.response?.status,
@@ -77,10 +77,11 @@ function getGenerationErrorDetails(error) {
     .find((value) => Number.isInteger(value) && value >= 400 && value <= 599) || null;
 
   const code = String(
-    error?.code || providerError?.status || error?.name || ''
+    error?.code || error?.status || providerError?.status || error?.name || ''
   ).toUpperCase();
   const diagnostic = [
     code,
+    String(error?.status || ''),
     String(providerError?.status || ''),
     String(error?.statusText || ''),
     message,
