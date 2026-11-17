@@ -11,7 +11,6 @@ import LoggedMeals from '../components/dashboard/LoggedMeals';
 import HabitsAndWeight from '../components/dashboard/HabitsAndWeight';
 import IoTScaleBridge from '../components/dashboard/IoTScaleBridge';
 import ProfileSettingsModal from '../components/profile/ProfileSettingsModal';
-import MacroRecommendations from '../components/MacroRecommendations';
 import { useDashboardData } from '../hooks/useDashboardData';
 
 
@@ -51,7 +50,6 @@ export default function Dashboard() {
     insightsError,
     isLoadingInsights,
     refreshInsights,
-    refreshDashboardData,
     router
   } = useDashboardData();
 
@@ -171,12 +169,6 @@ export default function Dashboard() {
   )}
   <p className="text-[10px] text-slate-500">AI suggestions are general nutrition information, not medical advice. Availability depends on the shared Gemini service and account usage allowance.</p>
 </section>
-
-<MacroRecommendations
-  userId={user?.id || user?._id}
-  selectedDate={selectedDate}
-  onLogSuccess={refreshDashboardData}
-/>
 
 <MacroCards
           consumedCalories={consumedCalories}
