@@ -11,6 +11,7 @@ import LoggedMeals from '../components/dashboard/LoggedMeals';
 import HabitsAndWeight from '../components/dashboard/HabitsAndWeight';
 import IoTScaleBridge from '../components/dashboard/IoTScaleBridge';
 import ProfileSettingsModal from '../components/profile/ProfileSettingsModal';
+import MacroRecommendations from '../components/MacroRecommendations';
 import { useDashboardData } from '../hooks/useDashboardData';
 
 
@@ -43,9 +44,14 @@ export default function Dashboard() {
     proteinGoal,
     mealBreakdown,
     displayDateHeader,
+    mealSuggestion,
     behaviorInsight,
     healthRisk,
+    insightsMessage,
+    insightsError,
     isLoadingInsights,
+    refreshInsights,
+    refreshDashboardData,
     router
   } = useDashboardData();
 
@@ -100,35 +106,77 @@ export default function Dashboard() {
   loggedDates={loggedDates}
 />
 
-{/* HEALTH RISK BANNER — only renders when a real risk was flagged */}
-{healthRisk && (
-  <div className="bg-amber-950/30 border border-amber-700/50 rounded-2xl p-4 flex items-start gap-3">
-    <div className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 flex-shrink-0 mt-0.5">
-      <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+{/* NUTRIAI DAILY ANALYST — rendered for every signed-in user */}
+<section className="rounded-2xl border border-cyan-900/60 bg-[#111b2b] p-4 md:p-5 space-y-4">
+  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <div className="flex items-start gap-3">
+      <div className="mt-0.5 rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-2">
+        <Sparkles className="h-4 w-4 text-cyan-300" />
+      </div>
+      <div>
+        <h2 className="text-sm font-bold text-white">NutriAI Daily Analyst</h2>
+        <p className="mt-1 text-xs text-slate-400">Personalized observations from your recent food logs and nutrition goals.</p>
+      </div>
     </div>
-    <div>
-      <h4 className="text-[10px] font-bold text-amber-400 uppercase tracking-widest mb-1">Health Alert</h4>
-      <p className="text-xs text-amber-100/90 leading-relaxed">{healthRisk}</p>
-    </div>
+    <button
+      type="button"
+      onClick={() => refreshInsights(user?.id || user?._id, { forceRefresh: true })}
+      disabled={isLoadingInsights}
+      className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-cyan-800/70 bg-cyan-950/40 px-3 py-2 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-900/50 disabled:cursor-wait disabled:opacity-50"
+    >
+      <Sparkles className={`h-3.5 w-3.5 ${isLoadingInsights ? 'animate-pulse' : ''}`} />
+      {isLoadingInsights ? 'Analyzing…' : 'Refresh analysis'}
+    </button>
   </div>
-)}
 
-{/* BEHAVIOR INSIGHT CARD */}
-{(isLoadingInsights || behaviorInsight) && (
-  <div className="bg-[#121A2A] border border-gray-800/80 rounded-2xl p-4 flex items-start gap-3">
-    <div className="p-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex-shrink-0 mt-0.5">
-      <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+  {isLoadingInsights && (
+    <div className="rounded-xl border border-slate-700/70 bg-[#0b1422]/70 p-3 text-xs text-slate-300" role="status">
+      NutriAI is reviewing your recent food logs…
     </div>
-    <div>
-      <h4 className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-1">Your Patterns</h4>
-      {isLoadingInsights ? (
-        <p className="text-xs text-gray-500 font-mono">Analyzing...</p>
-      ) : (
-        <p className="text-xs text-gray-300 leading-relaxed">{behaviorInsight}</p>
-      )}
+  )}
+  {insightsError && (
+    <div className="rounded-xl border border-amber-700/50 bg-amber-950/20 p-3 text-xs leading-relaxed text-amber-200" role="alert">
+      {insightsError}
     </div>
-  </div>
-)}
+  )}
+  {insightsMessage && !insightsError && (
+    <div className="rounded-xl border border-slate-700/70 bg-[#0b1422]/70 p-3 text-xs leading-relaxed text-slate-300" role="status">
+      {insightsMessage}
+    </div>
+  )}
+  {mealSuggestion && (
+    <div className="rounded-xl border border-emerald-800/50 bg-emerald-950/20 p-3">
+      <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-emerald-300">Next meal suggestion</p>
+      <p className="text-sm leading-relaxed text-slate-100">{mealSuggestion}</p>
+    </div>
+  )}
+  {behaviorInsight && (
+    <div className="rounded-xl border border-slate-700/70 bg-[#0b1422]/70 p-3">
+      <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-cyan-300">Your nutrition patterns</p>
+      <p className="text-sm leading-relaxed text-slate-200">{behaviorInsight}</p>
+    </div>
+  )}
+  {healthRisk && (
+    <div className="rounded-xl border border-amber-700/50 bg-amber-950/20 p-3">
+      <div className="mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-amber-300">
+        <AlertTriangle className="h-3.5 w-3.5" /> Nutrition observation
+      </div>
+      <p className="text-xs leading-relaxed text-amber-100">{healthRisk}</p>
+    </div>
+  )}
+  {!isLoadingInsights && !insightsError && !insightsMessage && !mealSuggestion && !behaviorInsight && (
+    <p className="rounded-xl border border-dashed border-slate-700 p-3 text-xs text-slate-400">
+      Your analyst will appear here when enough food-log data is available. Refresh after adding meals.
+    </p>
+  )}
+  <p className="text-[10px] text-slate-500">AI suggestions are general nutrition information, not medical advice. Availability depends on the shared Gemini service and account usage allowance.</p>
+</section>
+
+<MacroRecommendations
+  userId={user?.id || user?._id}
+  selectedDate={selectedDate}
+  onLogSuccess={refreshDashboardData}
+/>
 
 <MacroCards
           consumedCalories={consumedCalories}
