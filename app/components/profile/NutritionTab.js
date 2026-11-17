@@ -109,6 +109,7 @@ export default function NutritionTab({ user }) {
   const [aiNotice, setAiNotice] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [waterLogs, setWaterLogs] = useState([]);
 
   const userGoals = useMemo(() => deriveUserGoals(user), [user]);
 
@@ -238,27 +239,33 @@ export default function NutritionTab({ user }) {
     });
   }, [analyticsData, period, rangeStart]);
 
-  // Water is saved per day in this browser's localStorage, not in FoodLog.
-  // Average only days with a saved value; missing records are not treated as zero.
+  useEffect(() => {
+    if (!userId) { setWaterLogs([]); return; }
+    let cancelled = false;
+    fetch(`/api/water-log?userId=${encodeURIComponent(userId)}&start=${rangeStart}&end=${rangeEnd}`, { cache: 'no-store' })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Failed to load water history');
+        return data;
+      })
+      .then((data) => { if (!cancelled) setWaterLogs(data.logs || []); })
+      .catch((error) => {
+        console.error('Water history fetch error:', error);
+        if (!cancelled) setWaterLogs([]);
+      });
+    return () => { cancelled = true; };
+  }, [userId, rangeStart, rangeEnd, refreshKey]);
+
+  // Average only days with a saved water record. Missing days are not treated as zero.
   const waterStats = useMemo(() => {
-    if (typeof window === 'undefined') return { average: 0, daysWithData: 0, totalDays: 0 };
     let total = 0;
-    let daysWithData = 0;
-    let totalDays = 0;
-    let cursor = dateStringToUTCAnchor(rangeStart);
-    const endAnchor = dateStringToUTCAnchor(rangeEnd);
-    while (cursor.getTime() <= endAnchor.getTime()) {
-      totalDays++;
-      const key = utcAnchorToDateString(cursor);
-      const value = localStorage.getItem('water_' + key);
-      if (value !== null && value !== '') {
-        total += Math.max(0, Number.parseInt(value, 10) || 0);
-        daysWithData++;
-      }
-      cursor = addDaysUTC(cursor, 1);
-    }
+    const daysWithData = waterLogs.length;
+    waterLogs.forEach((log) => { total += Math.max(0, Number(log.amountMl) || 0); });
+    const start = dateStringToUTCAnchor(rangeStart);
+    const end = dateStringToUTCAnchor(rangeEnd);
+    const totalDays = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
     return { average: daysWithData ? Math.round(total / daysWithData) : 0, daysWithData, totalDays };
-  }, [rangeStart, rangeEnd, refreshKey]);
+  }, [waterLogs, rangeStart, rangeEnd]);
 
   const avgWaterMl = waterStats.average;
   const totals = useMemo(() => {
@@ -707,7 +714,7 @@ export default function NutritionTab({ user }) {
                     <div className="text-[11px] text-slate-400 font-mono mt-0.5">
                       <span className="text-blue-400 font-bold">{avgWaterMl ? avgWaterMl.toLocaleString() : '—'} ml</span> / {userGoals.waterMl.toLocaleString()} ml goal
                     </div>
-                    <p className="mt-1 text-[10px] text-slate-500">{waterStats.daysWithData} of {waterStats.totalDays} days recorded on this device</p>
+                    <p className="mt-1 text-[10px] text-slate-500">{waterStats.daysWithData} of {waterStats.totalDays} days recorded</p>
                   </div>
                 </div>
 
