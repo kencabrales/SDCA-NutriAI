@@ -92,7 +92,7 @@ export async function GET(req) {
 
     const analysisDayStart = new Date(today + 'T00:00:00+08:00');
     const generationsToday = await AIUsageEvent.countDocuments({
-      userId, feature: 'daily-insights', status: { $in: ['success', 'failed', 'quota'] },
+      userId, feature: 'daily-insights', status: 'success',
       createdAt: { $gte: analysisDayStart },
     });
     if (generationsToday >= DAILY_GENERATION_LIMIT) {
@@ -141,6 +141,21 @@ export async function GET(req) {
       return NextResponse.json(toPayload(saved, { cached: false }));
     } catch (generationError) {
       console.error('NutriAI insight generation failed:', generationError?.message || generationError);
+
+      // Dashboard and Diary can request the same daily analysis close together.
+      // If the other request saved it first, reuse that matching result.
+      try {
+        const latest = await AIInsight.findOne({ userId, date: today }).lean();
+        if (latest?.insightsFingerprint === insightsFingerprint) {
+          return NextResponse.json(toPayload(latest, {
+            cached: true,
+            message: 'Showing the latest analysis for your current food logs.',
+          }));
+        }
+      } catch (cacheReadError) {
+        console.error('Could not check the latest NutriAI cache:', cacheReadError?.message || cacheReadError);
+      }
+
       if (cached) return NextResponse.json(toPayload(cached, { cached: true, stale: true, warning: 'A fresh AI analysis could not be generated. Showing your last saved analysis.' }));
       const detail = String(generationError?.message || '');
       const code = String(generationError?.code || '').toUpperCase();
