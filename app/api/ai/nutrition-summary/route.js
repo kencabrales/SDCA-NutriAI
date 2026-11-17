@@ -54,7 +54,7 @@ async function buildRangeSummary(userId, start, end) {
     bucket.protein += log.protein || 0;
     bucket.carbs += log.carbs || 0;
     bucket.fat += log.fat || 0;
-    bucket.items.push(`${log.foodName} (${normalizeMealType(log.mealType)})`);
+    if (bucket.items.length < 5) bucket.items.push(`${log.foodName} (${normalizeMealType(log.mealType)})`);
   });
 
   return Object.values(dayTotals)
@@ -77,7 +77,8 @@ export async function GET(req) {
     const start = searchParams.get('start');
     const end = searchParams.get('end');
     const periodLabel = searchParams.get('periodLabel') || ''; // e.g. "weekly" — just for prompt phrasing
-    const forceRefresh = searchParams.get('refresh') === 'true';
+    const generateRequested = searchParams.get('generate') === 'true';
+    const forceRefresh = false;
 
     if (!userId || !start || !end) {
       return NextResponse.json({ error: 'userId, start, and end are required' }, { status: 400 });
@@ -99,6 +100,16 @@ export async function GET(req) {
       await recordAIUsage({ userId, feature: 'nutrition-summary-cache', status: 'cached' });
       return NextResponse.json({ nutritionSummary: cached.nutritionSummary, cached: true });
     }
+    if (!generateRequested) {
+      return NextResponse.json({
+        nutritionSummary: cached?.nutritionSummary || null,
+        cached: Boolean(cached),
+        message: cached
+          ? 'Showing the saved analysis. Select Analyze this period only when you want a new review.'
+          : 'Select Analyze this period when you are ready to use AI.',
+      });
+    }
+
     const analysisDayStart = new Date(`${getTodayPH()}T00:00:00+08:00`);
     const todayAnalyses = await AIUsageEvent.countDocuments({
       userId,
@@ -145,7 +156,7 @@ ${JSON.stringify(dailyTotals, null, 2)}
 Remember: return ONLY the JSON object.`;
 
     try {
-      const aiResult = await withTimeout(generateJSON(prompt, { retries: 0, userId, feature: 'nutrition-summary' }), GENERATION_TIMEOUT_MS);
+      const aiResult = await withTimeout(generateJSON(prompt, { retries: 0, userId, feature: 'nutrition-summary', maxOutputTokens: 180 }), GENERATION_TIMEOUT_MS);
 
       const saved = await AIInsight.findOneAndUpdate(
         { userId, rangeKey },
