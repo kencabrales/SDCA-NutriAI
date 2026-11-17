@@ -25,6 +25,7 @@ function FoodDiaryContent() {
   const [logs, setLogs] = useState([]);
   const [waterAmount, setWaterAmount] = useState(0);
   const [customWater, setCustomWater] = useState('');
+  const [isSavingWater, setIsSavingWater] = useState(false);
   const [loading, setLoading] = useState(false);
   const [currentDate, setCurrentDate] = useState('');
   const [isHydrated, setIsHydrated] = useState(false);
@@ -63,6 +64,42 @@ function FoodDiaryContent() {
 
   const router = useRouter();
   const mealCategories = ['breakfast', 'lunch', 'dinner', 'snacks'];
+
+const fetchWaterForDate = useCallback(async (userId, dateStr) => {
+  if (!userId || !dateStr) return;
+  try {
+    const response = await fetch(`/api/water-log?userId=${encodeURIComponent(userId)}&date=${dateStr}`, { cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Failed to load water log');
+
+    if (data.log) {
+      setWaterAmount(Number(data.log.amountMl) || 0);
+      return;
+    }
+
+    // One-time migration of older browser-only water entries into the account database.
+    const legacyValue = localStorage.getItem(`water_${userId}_${dateStr}`) ?? localStorage.getItem(`water_${dateStr}`);
+    const legacyAmount = Number.parseInt(legacyValue || '0', 10);
+    if (legacyAmount > 0) {
+      const migrateResponse = await fetch('/api/water-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, date: dateStr, amountMl: legacyAmount, mode: 'set' }),
+      });
+      const migrated = await migrateResponse.json().catch(() => ({}));
+      if (migrateResponse.ok) {
+        setWaterAmount(Number(migrated.log?.amountMl) || legacyAmount);
+        localStorage.removeItem(`water_${userId}_${dateStr}`);
+        localStorage.removeItem(`water_${dateStr}`);
+        return;
+      }
+    }
+    setWaterAmount(0);
+  } catch (error) {
+    console.error('Failed to load water log:', error);
+    setWaterAmount(0);
+  }
+}, []);
 
 const fetchDailyLogs = useCallback(async (userId, dateStr) => {
   if (!dateStr || !userId) return;
@@ -134,11 +171,10 @@ useEffect(() => {
     // Restore today's saved AI suggestion from MongoDB without generating a new response.
     fetchMealSuggestion(userId, { generate: false, silent: true });
     
-    const savedWater = localStorage.getItem(`water_${today}`);
-    if (savedWater) setWaterAmount(parseInt(savedWater, 10));
+    fetchWaterForDate(userId, today);
     setIsHydrated(true);
   }
-}, [router, fetchDailyLogs, fetchMealSuggestion]);
+}, [router, fetchDailyLogs, fetchMealSuggestion, fetchWaterForDate]);
 
   // Browsing the calendar only ever changes which day's LOGS you're looking
   // at. It never touches the AI suggestion — that stays pinned to today.
@@ -146,8 +182,7 @@ useEffect(() => {
     setCurrentDate(newDateStr);
     if (user) {
       fetchDailyLogs(user.id || user._id, newDateStr);
-      const savedWater = localStorage.getItem(`water_${newDateStr}`);
-      setWaterAmount(savedWater ? parseInt(savedWater, 10) : 0);
+      fetchWaterForDate(user.id || user._id, newDateStr);
     }
   };
 
@@ -305,12 +340,25 @@ if (res.ok) {
     });
   };
 
-  const quickLogWater = (amountInMl) => {
-    if (!currentDate || isNaN(amountInMl) || amountInMl <= 0) return;
-    const total = waterAmount + amountInMl;
-    setWaterAmount(total);
-    localStorage.setItem(`water_${currentDate}`, total);
-    showToastNotification('Hydration Tracked', `+${amountInMl} ml water added.`, 'success');
+  const quickLogWater = async (amountInMl) => {
+    const userId = user?.id || user?._id;
+    if (!currentDate || !userId || !Number.isFinite(Number(amountInMl)) || Number(amountInMl) <= 0 || isSavingWater) return;
+    setIsSavingWater(true);
+    try {
+      const response = await fetch('/api/water-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, date: currentDate, amountMl: Number(amountInMl), mode: 'increment' }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Could not save water intake');
+      setWaterAmount(Number(data.log?.amountMl) || 0);
+      showToastNotification('Hydration Tracked', `+${amountInMl} ml water added.`, 'success');
+    } catch (error) {
+      showToastNotification('Water Not Saved', error.message || 'Please try again.', 'error');
+    } finally {
+      setIsSavingWater(false);
+    }
   };
 
   const handleCustomWaterSubmit = (e) => {
@@ -635,8 +683,8 @@ if (res.ok) {
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => quickLogWater(250)} className="bg-[#161F30] border border-gray-800 hover:border-cyan-800 hover:text-cyan-400 text-xs font-bold py-2 rounded-xl transition-all">+250 ml</button>
-            <button onClick={() => quickLogWater(500)} className="bg-[#161F30] border border-gray-800 hover:border-cyan-800 hover:text-cyan-400 text-xs font-bold py-2 rounded-xl transition-all">+500 ml</button>
+            <button disabled={isSavingWater} onClick={() => quickLogWater(250)} className="bg-[#161F30] border border-gray-800 hover:border-cyan-800 hover:text-cyan-400 text-xs font-bold py-2 rounded-xl transition-all">+250 ml</button>
+            <button disabled={isSavingWater} onClick={() => quickLogWater(500)} className="bg-[#161F30] border border-gray-800 hover:border-cyan-800 hover:text-cyan-400 text-xs font-bold py-2 rounded-xl transition-all">+500 ml</button>
           </div>
 
           <form onSubmit={handleCustomWaterSubmit} className="relative flex items-center">
@@ -649,7 +697,7 @@ if (res.ok) {
               className="w-full bg-[#161F30] border border-gray-800 rounded-xl pl-3 pr-16 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 placeholder-gray-600 font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
             />
             <button 
-              type="submit" 
+              type="submit" disabled={isSavingWater}
               className="absolute right-1.5 bg-cyan-950 hover:bg-cyan-900 border border-cyan-800 text-cyan-400 font-bold px-2.5 py-1 rounded-lg text-[10px] uppercase transition-all"
             >
               + Add

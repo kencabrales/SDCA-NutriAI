@@ -53,22 +53,6 @@ export default function Home() {
             I have an account
           </button>
         </div>
-
-        {/* Feature Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full text-left max-w-5xl mt-4">
-          <div className="bg-[#121A2A] border border-gray-900 rounded-2xl p-6">
-            <h3 className="font-bold text-lg text-white mb-2">IoT Enabled</h3>
-            <p className="text-gray-400 text-sm">Connects directly to Bluetooth scales for real-time precision weighing.</p>
-          </div>
-          <div className="bg-[#121A2A] border border-gray-900 rounded-2xl p-6">
-            <h3 className="font-bold text-lg text-white mb-2">AI Powered</h3>
-            <p className="text-gray-400 text-sm">AI Nutritionist calculates macros and gives personalized health advice.</p>
-          </div>
-          <div className="bg-[#121A2A] border border-gray-900 rounded-2xl p-6">
-            <h3 className="font-bold text-lg text-white mb-2">Smart Tracking</h3>
-            <p className="text-gray-400 text-sm">Offline-capable PWA that syncs your progress when back online.</p>
-          </div>
-        </div>
       </section>
 
       <footer className="py-4 text-center text-xs text-gray-600">
