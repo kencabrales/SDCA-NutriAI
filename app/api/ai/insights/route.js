@@ -134,7 +134,7 @@ export async function GET(req) {
       'Profile and daily targets:', JSON.stringify(profile),
       'Today totals and foods:', JSON.stringify(todayTotals),
       'Last seven days (daily totals and up to eight food names per day):', JSON.stringify(compactHistory),
-    ].join('\\n\\n');
+    ].join('\n\n');
 
     try {
       const result = await withTimeout(generateJSON(prompt, { retries: 0, userId, feature: 'daily-insights', maxOutputTokens: 260 }), GENERATION_TIMEOUT_MS);
