@@ -189,7 +189,7 @@ Remaining targets: ${JSON.stringify(deficit)}
 Foods logged: ${JSON.stringify(foodHistory)}
 Possible saved recipes (per serving): ${JSON.stringify(recipes)}`;
 
-    const ai = await generateJSON(prompt, { retries: 0, userId, feature: 'meal-recommendations' });
+    const ai = await generateJSON(prompt, { retries: 0, userId, feature: 'meal-recommendations', maxOutputTokens: 420 });
     failedStep = 'saving the generated recommendations';
     const suggestions = Array.isArray(ai.suggestions)
       ? ai.suggestions.filter((item) => item && typeof item.name === 'string').slice(0, 3).map((item) => ({
