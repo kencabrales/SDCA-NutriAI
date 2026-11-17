@@ -33,8 +33,14 @@ export async function POST(request) {
       proteinGrams,
       targetProtein, // Fallback for frontend passing 'targetProtein'
       fatGrams,
-      targetFat // Fallback for frontend passing 'targetFat'
+      targetFat, // Fallback for frontend passing 'targetFat'
+      termsAccepted,
+      termsVersion
     } = data;
+
+    if (termsAccepted !== true || typeof termsVersion !== 'string' || !termsVersion.trim()) {
+      return NextResponse.json({ error: 'You must accept the Terms and Conditions before registering.' }, { status: 400 });
+    }
 
     // Use heightCm or fallback to height
     const rawHeight = heightCm ?? height;
@@ -92,6 +98,9 @@ export async function POST(request) {
       lastName,
       email: normalizedEmail,
       password,
+      termsAccepted: true,
+      termsAcceptedAt: new Date(),
+      termsVersion: termsVersion.trim(),
       username: `${firstName.toLowerCase()}${lastName.toLowerCase()}`,
       dob: formattedDob,
       age: calculatedAge,
