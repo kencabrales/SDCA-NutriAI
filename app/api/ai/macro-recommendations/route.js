@@ -175,7 +175,6 @@ export async function POST(req) {
     }
 
     failedStep = 'Gemini generation';
-    failedStep = 'Gemini generation';
     reservedGeneration = true;
     reservedUserId = userId;
     reservedDate = usageDate;
