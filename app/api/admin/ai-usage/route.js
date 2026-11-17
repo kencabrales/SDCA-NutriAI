@@ -118,7 +118,17 @@ export async function GET(request) {
     })).sort((a, b) => b.requests - a.requests);
 
     const settings = await AIUsageSetting.find({}).sort({ projectLabel: 1, model: 1 }).lean();
-    const scopesWithSettings = [...scopes.values()].map((scope) => {
+    const scopeMap = new Map([...scopes.values()].map((scope) => [scope.key, scope]));
+    for (const setting of settings) {
+      const key = `${setting.projectLabel}::${setting.model}`;
+      if (!scopeMap.has(key)) {
+        scopeMap.set(key, {
+          key, projectLabel: setting.projectLabel, model: setting.model,
+          requests: 0, tokens: 0, rpm: 0, tpm: 0, rpd: 0, actualTokenEvents: 0,
+        });
+      }
+    }
+    const scopesWithSettings = [...scopeMap.values()].map((scope) => {
       const setting = settings.find((item) => item.projectLabel === scope.projectLabel && item.model === scope.model);
       return {
         ...scope,
@@ -134,7 +144,7 @@ export async function GET(request) {
       summary: {
         requests: events.filter((event) => event.status !== 'cached').length,
         cachedResponses, failedRequests, quotaErrors,
-        estimatedTokens, actualTokens, actualTokenEvents,
+        estimatedTokens, actualTokens, trackedTokens: events.reduce((sum, event) => sum + tokensFor(event), 0), actualTokenEvents,
       },
       daily: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)),
       perUser,
