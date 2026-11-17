@@ -358,7 +358,7 @@ export default function NutritionTab({ user }) {
 
     setAiLoading(true);
     setAiNotice('');
-    setAiSummary('');
+    // Keep the previous analysis visible while a refresh is attempted.
     try {
       const params = new URLSearchParams({
         userId: String(userId),
@@ -368,13 +368,20 @@ export default function NutritionTab({ user }) {
         generate: 'true',
       });
       const response = await fetch(`/api/ai/nutrition-summary?${params.toString()}`);
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || data.error || 'AI analysis is temporarily unavailable.');
-      setAiSummary(data.nutritionSummary || '');
-      setAiNotice(data.cached
-        ? 'Showing a saved analysis to conserve free AI usage.'
-        : (data.message || ''));
-      if (!data.nutritionSummary && !data.message) {
+      const data = await response.json().catch(() => ({}));
+
+      if (data.nutritionSummary) {
+        setAiSummary(data.nutritionSummary);
+      }
+      if (!response.ok) {
+        setAiNotice(data.warning || data.message || data.error ||
+          'AI analysis is temporarily unavailable. Your nutrition reports still work.');
+      } else {
+        setAiNotice(data.warning || (data.cached
+          ? 'Showing a saved analysis to conserve free AI usage.'
+          : (data.message || '')));
+      }
+      if (!data.nutritionSummary && !data.warning && !data.message) {
         setAiNotice('There is not enough logged food data for an analysis yet.');
       }
     } catch (err) {
