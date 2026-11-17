@@ -141,8 +141,7 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
     const userId = user?.id || user?._id;
     if (!userId) return;
     await fetchDashboardData(userId, selectedDate);
-    await fetchInsights(userId);
-  }, [user, selectedDate, fetchDashboardData, fetchInsights]);
+  }, [user, selectedDate, fetchDashboardData]);
 
   // --- INITIAL HYDRATION & DATA FETCH ---
   useEffect(() => {
@@ -156,9 +155,8 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
     setUser(parsedUser);
 
     fetchDashboardData(parsedUser.id || parsedUser._id, selectedDate);
-    fetchInsights(parsedUser.id || parsedUser._id);
     setIsHydrated(true);
-  }, [router, selectedDate, fetchDashboardData, fetchInsights]);
+  }, [router, selectedDate, fetchDashboardData]);
 
   // --- RE-FETCH ON TAB FOCUS ---
   useEffect(() => {
@@ -168,12 +166,11 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
         const parsedUser = JSON.parse(session);
         const userId = parsedUser.id || parsedUser._id;
         fetchDashboardData(userId, selectedDate);
-        fetchInsights(userId);
       }
     };
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
-  }, [selectedDate, fetchDashboardData, fetchInsights]);
+  }, [selectedDate, fetchDashboardData]);
 
   // --- HANDLERS & CALCULATIONS ---
   const handleLogout = () => {
