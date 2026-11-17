@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import dbConnect from '@/lib/mongodb';
 import WaterLog from '@/lib/WaterLog';
 
-const DATE_PATTERN = /^\\d{4}-\\d{2}-\\d{2}$/;
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function GET(request) {
   try {
