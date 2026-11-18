@@ -80,7 +80,8 @@ export async function POST(req) {
         { status: 400 }
       );
     }
-\n    const logDate = date ? new Date(date) : new Date();
+
+    const logDate = date ? new Date(date) : new Date();
     if (isNaN(logDate.getTime())) {
       return NextResponse.json({ error: 'Invalid date' }, { status: 400 });
     }
