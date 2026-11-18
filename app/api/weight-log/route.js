@@ -55,7 +55,7 @@ export async function GET(req) {
         unit: user?.weightUnit || 'kg',
         weeklyWeightRateKg: user?.weeklyWeightRateKg || 0.45359237,
         nutritionalStrategy: user?.nutritionalStrategy || user?.weeklyPace || user?.weeklyGoal || '',
-      },,
+      },
     }, { status: 200 });
 
   } catch (error) {
