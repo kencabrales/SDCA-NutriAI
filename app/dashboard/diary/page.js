@@ -133,6 +133,10 @@ const fetchMealSuggestion = useCallback(async (
   { generate = true, silent = false } = {}
 ) => {
   if (!userId) return;
+  if (!navigator.onLine) {
+    if (!silent) setMealSuggestionMessage('AI suggestions need an internet connection. Your saved food logs remain available offline.');
+    return;
+  }
   if (!silent) {
     setIsLoadingSuggestion(true);
     setMealSuggestionError('');
