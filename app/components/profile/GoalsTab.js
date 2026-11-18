@@ -11,6 +11,10 @@ import {
 } from 'lucide-react';
 import Toast from '../Toast';
 
+const KG_PER_LB = 0.45359237;
+const DEFAULT_WEEKLY_RATE_KG = KG_PER_LB;
+const WEEKLY_RATE_OPTIONS_LB = [0.5, 0.75, 1, 1.5, 2];
+
 // Recalculates the SUGGESTED calorie target from biometrics using the
 // Mifflin-St Jeor equation (or Katch-McArdle if body fat % is known),
 // then applies activity level and cut/maintain/bulk strategy adjustments.
@@ -60,15 +64,17 @@ export const calculateAutoTargets = (data, weightUnit = 'kg') => {
     heavy: 1.725,
   };
 
+  const actMult = activityMultipliers[data?.activityLevel] || 1.2;
+  const selectedStrategy = data?.nutritionalStrategy || data?.weeklyPace || data?.weeklyGoal || 'cut';
+  const weeklyWeightRateKg = Math.min(2, Math.max(0.05, Number(data?.weeklyWeightRateKg) || DEFAULT_WEEKLY_RATE_KG));
+  // Approximate energy equivalent for planning: 7,700 kcal per kg, spread over 7 days.
+  const paceBasedDailyDeficit = Math.round((weeklyWeightRateKg * 7700) / 7);
   const strategyCalorieAdjustments = {
-    cut: -500,
+    cut: -paceBasedDailyDeficit,
     maintain: 0,
     bulk: 500,
   };
-
-  const actMult = activityMultipliers[data?.activityLevel] || 1.2;
-  const selectedStrategy = data?.nutritionalStrategy || data?.weeklyPace || data?.weeklyGoal || 'cut';
-  const paceAdj = strategyCalorieAdjustments[selectedStrategy] ?? 0;
+  const paceAdj = strategyCalorieAdjustments[selectedStrategy] ?? -paceBasedDailyDeficit;
 
   const tdee = Math.round(bmr * actMult);
   const minSafeCalories = 1200;
@@ -164,12 +170,6 @@ export default function GoalsTab({
     heavy: 'Heavy (6-7 Days/Wk)',
   };
 
-  const strategyLabels = {
-    cut: 'Cut (-500 kcal)',
-    maintain: 'Maintain',
-    bulk: 'Bulk (+500 kcal)',
-  };
-
   const triggerChange = (name, value) => {
     handleChange({ target: { name, value } });
   };
@@ -204,6 +204,30 @@ export default function GoalsTab({
   const dob = formData?.dob || formData?.dateOfBirth;
   const sex = formData?.sex || formData?.biologicalSex;
   const bodyFat = formData?.bodyFat;
+  const weeklyWeightRateKg = Math.min(2, Math.max(0.05, Number(formData?.weeklyWeightRateKg) || DEFAULT_WEEKLY_RATE_KG));
+  const estimatedDailyDeficit = Math.round((weeklyWeightRateKg * 7700) / 7);
+  const displayedWeeklyRate = weightUnit === 'lbs' ? weeklyWeightRateKg / KG_PER_LB : weeklyWeightRateKg;
+  const pacePreview = calculateAutoTargets({
+    currentWeight,
+    nutritionalStrategy,
+    activityLevel,
+    height,
+    age,
+    dob,
+    sex,
+    bodyFat,
+    weeklyWeightRateKg,
+  }, weightUnit);
+  const effectiveDailyDeficit = pacePreview
+    ? Math.max(0, pacePreview.tdee - pacePreview.targetCalories)
+    : estimatedDailyDeficit;
+  const paceLimitedByCalorieFloor = nutritionalStrategy === 'cut' && effectiveDailyDeficit < estimatedDailyDeficit;
+  const displayedCutDeficit = nutritionalStrategy === 'cut' ? effectiveDailyDeficit : estimatedDailyDeficit;
+  const strategyLabels = {
+    cut: `Cut (-${displayedCutDeficit} kcal)`,
+    maintain: 'Maintain',
+    bulk: 'Bulk (+500 kcal)',
+  };
 
   // Recomputes the suggested calorie target (Mifflin-St Jeor + activity + strategy)
   // and applies it immediately. Called ONLY from the onChange handlers below —
@@ -219,6 +243,7 @@ export default function GoalsTab({
       dob,
       sex,
       bodyFat: overrides.bodyFat ?? bodyFat,
+      weeklyWeightRateKg: overrides.weeklyWeightRateKg ?? weeklyWeightRateKg,
     };
     const auto = calculateAutoTargets(snapshot, weightUnit);
     if (!auto) return;
@@ -267,6 +292,7 @@ export default function GoalsTab({
         goalWeight: formData.goalWeight !== '' && formData.goalWeight !== null && !isNaN(formData.goalWeight) ? Number(formData.goalWeight) : null,
         bodyFat: parsedBodyFat,
         nutritionalStrategy: formData.nutritionalStrategy || 'cut',
+        weeklyWeightRateKg: Number(formData.weeklyWeightRateKg) || DEFAULT_WEEKLY_RATE_KG,
         activityLevel: formData.activityLevel || 'sedentary',
       };
 
@@ -467,6 +493,46 @@ export default function GoalsTab({
               ))}
             </select>
           </div>
+
+          {nutritionalStrategy === 'cut' && (
+            <div className="p-4 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <span className="text-xs font-semibold text-gray-200 block">Weekly Weight-Loss Pace</span>
+                  <span className="text-[10px] text-gray-500">Used to calculate your calorie deficit</span>
+                </div>
+                <select
+                  name="weeklyWeightRateKg"
+                  value={weeklyWeightRateKg}
+                  onChange={(e) => {
+                    const nextRate = Number(e.target.value);
+                    triggerChange('weeklyWeightRateKg', nextRate);
+                    recalcCalorieTarget({ weeklyWeightRateKg: nextRate });
+                  }}
+                  className="bg-[#1C2638] border border-gray-800 rounded-xl px-3 py-1.5 text-xs font-semibold text-indigo-300 focus:outline-none focus:border-[#00A86B] cursor-pointer"
+                >
+                  {WEEKLY_RATE_OPTIONS_LB.map((rateLbs) => {
+                    const rateKg = rateLbs * KG_PER_LB;
+                    const label = weightUnit === 'lbs'
+                      ? `${rateLbs} lbs/week`
+                      : `${rateKg.toFixed(2)} kg/week`;
+                    return <option key={rateLbs} value={rateKg}>{label}</option>;
+                  })}
+                </select>
+              </div>
+              <p className="text-[10px] text-indigo-300">
+                Requested deficit: about {estimatedDailyDeficit.toLocaleString()} kcal/day at {displayedWeeklyRate.toFixed(2)} {weightUnit}/week.
+              </p>
+              {paceLimitedByCalorieFloor && (
+                <p className="text-[10px] text-amber-300">
+                  The existing 1,200 kcal/day minimum limits the calculated deficit to about {effectiveDailyDeficit.toLocaleString()} kcal/day for the current profile.
+                </p>
+              )}
+              <p className="text-[9px] leading-relaxed text-gray-500">
+                Changing this pace recalculates daily calories and macro grams using your current macro percentages. This is a planning estimate, not a guaranteed rate of weight change.
+              </p>
+            </div>
+          )}
 
           <div className="p-4 flex items-center justify-between hover:bg-[#121A2A]/40 transition-colors">
             <span className="text-xs font-semibold text-gray-200">Activity Level</span>

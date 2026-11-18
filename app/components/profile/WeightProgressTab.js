@@ -5,19 +5,21 @@ import {
   ResponsiveContainer,
   AreaChart,
   Area,
+  Line,
   XAxis,
   YAxis,
   Tooltip,
   ReferenceLine,
+  ReferenceDot,
 } from 'recharts';
 import {
   Scale,
   Calendar,
   Plus,
-  Image as ImageIcon,
   Loader2,
   X,
   Trash2,
+  ChevronDown,
 } from 'lucide-react';
 
 // DUMMY/FALLBACK DATA FOR PREVIEW (only used when there's no logged-in user)
@@ -34,20 +36,94 @@ const DUMMY_LOGS = [
 const scrollbarClasses =
   "[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-700 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-gray-600";
 const scrollbarStyle = { scrollbarWidth: 'thin', scrollbarColor: '#374151 transparent' };
+const KG_PER_LB = 0.45359237;
+const DEFAULT_WEEKLY_RATE_KG = KG_PER_LB;
+const WEEKLY_RATE_OPTIONS_LB = [0.5, 0.75, 1, 1.5, 2];
 
-export default function WeightProgressTab({ user, onUpdateUser }) {
+function convertWeight(value, fromUnit, toUnit) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  if (fromUnit === toUnit) return number;
+  return fromUnit === 'kg' ? number / KG_PER_LB : number * KG_PER_LB;
+}
+
+function parseLocalDate(value) {
+  if (!value) return null;
+  const dateOnly = String(value).slice(0, 10);
+  const parts = dateOnly.split('-').map(Number);
+  if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return null;
+  const date = new Date(parts[0], parts[1] - 1, parts[2], 12);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function addDays(date, days) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function addMonthsClamped(date, months) {
+  const day = date.getDate();
+  const result = new Date(date.getFullYear(), date.getMonth() + months, 1, 12);
+  const lastDay = new Date(result.getFullYear(), result.getMonth() + 1, 0).getDate();
+  result.setDate(Math.min(day, lastDay));
+  return result;
+}
+
+function toDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatWeightDate(date, options = { month: 'short', day: 'numeric', year: 'numeric' }) {
+  return date.toLocaleDateString('en-US', options);
+}
+
+function formatWeekDayDuration(totalDays) {
+  if (totalDays <= 0) return '0 days';
+  const weeks = Math.floor(totalDays / 7);
+  const days = totalDays % 7;
+  const parts = [];
+  if (weeks) parts.push(`${weeks} ${weeks === 1 ? 'week' : 'weeks'}`);
+  if (days) parts.push(`${days} ${days === 1 ? 'day' : 'days'}`);
+  return parts.join(', ') || 'Less than a day';
+}
+
+function formatCalendarDuration(startDate, endDate) {
+  let months = 0;
+  while (months < 120 && addMonthsClamped(startDate, months + 1) <= endDate) {
+    months += 1;
+  }
+  const monthAnchor = addMonthsClamped(startDate, months);
+  const remainingDays = Math.max(0, Math.round((endDate - monthAnchor) / 86400000));
+  const parts = [];
+  if (months) parts.push(`${months} ${months === 1 ? 'month' : 'months'}`);
+  if (remainingDays) parts.push(`${remainingDays} ${remainingDays === 1 ? 'day' : 'days'}`);
+  return parts.join(', ') || 'Less than a month';
+}
+
+export default function WeightProgressTab({ user, onUpdateUser, onNavigateToGoals }) {
   const isPreviewMode = !(user?._id || user?.id);
+  const userId = user?._id || user?.id;
 
   const [logs, setLogs] = useState([]);
-  // Real users get null (shown as "--") until they actually have data —
-  // no placeholder numbers pretending to be their real weight/goal.
-  // Preview mode (no logged-in user) keeps the old demo defaults.
+  const [recentLogs, setRecentLogs] = useState([]);
+  const [showWeightDetails, setShowWeightDetails] = useState(false);
   const [userSummary, setUserSummary] = useState({
-    startingWeight: isPreviewMode ? 75.5 : (user?.startingWeight || null),
-    currentWeight: isPreviewMode ? 72.5 : (user?.currentWeight || user?.weight || null),
-    goalWeight: isPreviewMode ? 68.0 : (user?.goalWeight || null),
+    startingWeight: isPreviewMode ? 75.5 : (user?.startingWeight ?? null),
+    startingWeightDate: user?.startingWeightDate || null,
+    currentWeight: isPreviewMode ? 72.5 : (user?.currentWeight ?? user?.weight ?? null),
+    lastWeighInDate: user?.lastWeighInDate || null,
+    goalWeight: isPreviewMode ? 68.0 : (user?.goalWeight ?? null),
     unit: user?.weightUnit || 'kg',
+    weeklyWeightRateKg: Number(user?.weeklyWeightRateKg) || DEFAULT_WEEKLY_RATE_KG,
+    nutritionalStrategy: user?.nutritionalStrategy || user?.weeklyPace || user?.weeklyGoal || '',
   });
+  const [displayUnit, setDisplayUnit] = useState(user?.weightUnit === 'lbs' ? 'lbs' : 'kg');
+  const [weeklyRateKg, setWeeklyRateKg] = useState(Number(user?.weeklyWeightRateKg) || DEFAULT_WEEKLY_RATE_KG);
+  const [savingUnit, setSavingUnit] = useState(false);
   const [range, setRange] = useState('1M');
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -57,9 +133,6 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
   // Form State
   const [newWeight, setNewWeight] = useState('');
   const [newDate, setNewDate] = useState(new Date().toISOString().split('T')[0]);
-  const [newPhoto, setNewPhoto] = useState('');
-
-  const userId = user?._id || user?.id;
 
   // Reject a weigh-in date set in the future (server re-validates independently on submit).
   const dateError = useMemo(() => {
@@ -75,33 +148,37 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
 
   const fetchLogs = async () => {
     if (!userId) {
-      // Use dummy data if no user session/id is present
       setLogs(DUMMY_LOGS);
+      setRecentLogs(DUMMY_LOGS.slice(0, 2));
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      const res = await fetch(`/api/weight-log?userId=${userId}&range=${range}`);
+      const res = await fetch(`/api/weight-log?userId=${encodeURIComponent(userId)}&range=${range}`);
       const data = await res.json();
-      if (res.ok && data.logs && data.logs.length > 0) {
-        setLogs(data.logs);
-        if (data.userSummary) {
-          setUserSummary({
-            startingWeight: data.userSummary.startingWeight || user?.startingWeight || null,
-            currentWeight: data.userSummary.currentWeight || user?.currentWeight || user?.weight || null,
-            goalWeight: data.userSummary.goalWeight || user?.goalWeight || null,
-            unit: data.userSummary.unit || user?.weightUnit || 'kg',
-          });
-        }
-      } else {
-        // No entries yet for this range — show an empty state, not dummy data,
-        // once we know we actually have a real user.
-        setLogs([]);
-      }
+      if (!res.ok) throw new Error(data.error || 'Failed to load weight history');
+
+      const summary = data.userSummary || {};
+      setLogs(Array.isArray(data.logs) ? data.logs : []);
+      setRecentLogs(Array.isArray(data.recentLogs) ? data.recentLogs : (Array.isArray(data.logs) ? data.logs.slice(0, 2) : []));
+      setUserSummary({
+        startingWeight: summary.startingWeight ?? user?.startingWeight ?? null,
+        startingWeightDate: summary.startingWeightDate || user?.startingWeightDate || null,
+        currentWeight: summary.currentWeight ?? user?.currentWeight ?? user?.weight ?? null,
+        lastWeighInDate: summary.lastWeighInDate || user?.lastWeighInDate || null,
+        goalWeight: summary.goalWeight ?? user?.goalWeight ?? null,
+        unit: summary.unit || user?.weightUnit || 'kg',
+        weeklyWeightRateKg: Number(summary.weeklyWeightRateKg || user?.weeklyWeightRateKg) || DEFAULT_WEEKLY_RATE_KG,
+        nutritionalStrategy: summary.nutritionalStrategy || user?.nutritionalStrategy || user?.weeklyPace || user?.weeklyGoal || '',
+      });
+      setWeeklyRateKg(Number(summary.weeklyWeightRateKg || user?.weeklyWeightRateKg) || DEFAULT_WEEKLY_RATE_KG);
+      setDisplayUnit(summary.unit || user?.weightUnit || 'kg');
     } catch (err) {
-      console.error('Error fetching logs:', err);
+      console.error('Error fetching weight logs:', err);
+      setError(err.message || 'Unable to load weight history.');
       setLogs([]);
+      setRecentLogs([]);
     } finally {
       setLoading(false);
     }
@@ -111,6 +188,14 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
     fetchLogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, range]);
+
+  useEffect(() => {
+    if (!user) return;
+    const preferredUnit = user.weightUnit === 'lbs' ? 'lbs' : 'kg';
+    setDisplayUnit(preferredUnit);
+    setWeeklyRateKg(Number(user.weeklyWeightRateKg) || DEFAULT_WEEKLY_RATE_KG);
+  }, [user?.weightUnit, user?.weeklyWeightRateKg]);
+
 
   const handleAddLog = async (e) => {
     e.preventDefault();
@@ -123,15 +208,13 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
       const newEntry = {
         _id: Date.now().toString(),
         weight: Number(newWeight),
-        unit: userSummary.unit,
+        unit: displayUnit,
         date: new Date(newDate).toISOString(),
-        photoUrl: newPhoto,
       };
       setLogs((prev) => [newEntry, ...prev]);
       setUserSummary((prev) => ({ ...prev, currentWeight: Number(newWeight) }));
       setIsModalOpen(false);
       setNewWeight('');
-      setNewPhoto('');
       setSubmitting(false);
       return;
     }
@@ -143,9 +226,8 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
         body: JSON.stringify({
           userId,
           weight: Number(newWeight),
-          unit: userSummary.unit,
+          unit: displayUnit,
           date: newDate,
-          photoUrl: newPhoto,
         }),
       });
 
@@ -154,7 +236,6 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
 
       setIsModalOpen(false);
       setNewWeight('');
-      setNewPhoto('');
       await fetchLogs();
 
       // Trust the server's returned user object rather than hand-constructing
@@ -190,43 +271,267 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
     }
   };
 
-  // Metrics Calculations — use null (not 0) when a value is genuinely unset,
-  // so "no data yet" doesn't get silently rendered as a fake 0kg/0% change.
-  const startWeight = userSummary.startingWeight ?? (logs.length ? logs[logs.length - 1].weight : null);
-  const currentWeight = logs.length ? logs[0].weight : (userSummary.currentWeight ?? startWeight);
-  const goalWeight = userSummary.goalWeight ?? null;
+  // Convert every stored measurement into the selected display unit before
+  // calculating metrics or drawing the chart. Historical log units stay intact.
+  const sortByMostRecent = (items) => [...items].sort((a, b) => {
+    const dateDifference = new Date(b.date) - new Date(a.date);
+    if (dateDifference !== 0) return dateDifference;
+    return new Date(b.createdAt || b.updatedAt || b.date) - new Date(a.createdAt || a.updatedAt || a.date);
+  });
+  const sortedLogsNewestFirst = useMemo(() => sortByMostRecent(logs), [logs]);
+  const sortedRecentLogsNewestFirst = useMemo(
+    () => sortByMostRecent(recentLogs.length ? recentLogs : logs).slice(0, 2),
+    [recentLogs, logs]
+  );
+  const latestLog = sortedRecentLogsNewestFirst[0] || null;
+  const previousLog = sortedRecentLogsNewestFirst[1] || null;
+  const earliestLog = sortedLogsNewestFirst[sortedLogsNewestFirst.length - 1] || null;
+  const sourceUnit = userSummary.unit || 'kg';
+
+  // If the account has a current profile weight but no separate WeightLog
+  // document, still show that saved snapshot and its known measurement date.
+  const profileWeightValue = userSummary.currentWeight ?? userSummary.weight ?? null;
+  const profileWeightRecord = profileWeightValue !== null && Number(profileWeightValue) > 0
+    ? {
+        _id: 'profile-weight-snapshot',
+        weight: Number(profileWeightValue),
+        unit: sourceUnit,
+        date: userSummary.lastWeighInDate || null,
+        isProfileSnapshot: true,
+      }
+    : null;
+  const latestMeasurement = latestLog || profileWeightRecord;
+  const latestMeasurementWeight = latestMeasurement
+    ? convertWeight(latestMeasurement.weight, latestMeasurement.unit || sourceUnit, displayUnit)
+    : null;
+  const latestMeasurementDate = latestLog
+    ? parseLocalDate(latestLog.date)
+    : parseLocalDate(profileWeightRecord?.date);
+  const latestLogWeight = latestLog
+    ? convertWeight(latestLog.weight, latestLog.unit || sourceUnit, displayUnit)
+    : null;
+  const previousLogWeight = previousLog
+    ? convertWeight(previousLog.weight, previousLog.unit || sourceUnit, displayUnit)
+    : null;
+  const changeSincePrevious = latestLogWeight !== null && previousLogWeight !== null
+    ? Number((latestLogWeight - previousLogWeight).toFixed(1))
+    : null;
+
+  const startWeight = userSummary.startingWeight !== null && userSummary.startingWeight !== undefined
+    ? convertWeight(userSummary.startingWeight, sourceUnit, displayUnit)
+    : (earliestLog ? convertWeight(earliestLog.weight, earliestLog.unit || sourceUnit, displayUnit) : null);
+  const currentWeight = latestLogWeight !== null
+    ? latestLogWeight
+    : (userSummary.currentWeight !== null && userSummary.currentWeight !== undefined
+      ? convertWeight(userSummary.currentWeight, sourceUnit, displayUnit)
+      : startWeight);
+  const goalWeight = userSummary.goalWeight !== null && userSummary.goalWeight !== undefined
+    ? convertWeight(userSummary.goalWeight, sourceUnit, displayUnit)
+    : null;
 
   const hasStartAndCurrent = startWeight !== null && currentWeight !== null;
-  const diff = hasStartAndCurrent ? (currentWeight - startWeight).toFixed(1) : null;
-  const pct = hasStartAndCurrent && startWeight > 0 ? ((diff / startWeight) * 100).toFixed(0) : null;
+  const diff = hasStartAndCurrent ? Number((currentWeight - startWeight).toFixed(1)) : null;
+  const pct = hasStartAndCurrent && startWeight > 0 ? Math.round((diff / startWeight) * 100) : null;
 
-  // Format Recharts Data
-  const { chartData, yDomain } = useMemo(() => {
-    if (!logs.length) return { chartData: [], yDomain: [0, 100] };
+  const forecast = useMemo(() => {
+    if (!(currentWeight > 0) || !(goalWeight > 0) || !(weeklyRateKg > 0)) return null;
 
-    const sorted = [...logs].sort((a, b) => new Date(a.date) - new Date(b.date));
-    
-    const formattedData = sorted.map((log) => ({
-      ...log,
-      dateStr: new Date(log.date).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' }),
-      weight: log.weight,
-    }));
+    const deltaKg = Math.abs(convertWeight(goalWeight, displayUnit, 'kg') - convertWeight(currentWeight, displayUnit, 'kg'));
+    const today = parseLocalDate(toDateKey(new Date()));
+    const hasCurrentProfileWeight = userSummary.currentWeight !== null && userSummary.currentWeight !== undefined;
+    const savedBaselineDate = latestLog
+      ? parseLocalDate(latestLog.date)
+      : hasCurrentProfileWeight
+        ? parseLocalDate(userSummary.lastWeighInDate)
+        : parseLocalDate(userSummary.startingWeightDate || userSummary.lastWeighInDate);
+    const baselineDate = savedBaselineDate || today;
+    const baselineDateWasAssumed = !savedBaselineDate;
+    const daysSinceBaseline = Math.max(0, Math.floor((today.getTime() - baselineDate.getTime()) / 86400000));
 
-    const weights = sorted.map((l) => l.weight);
-    if (goalWeight > 0) weights.push(goalWeight);
+    if (deltaKg < 0.01) {
+      return {
+        alreadyReached: true,
+        expectedDate: baselineDate,
+        startDate: baselineDate,
+        weeks: 0,
+        days: 0,
+        daysSinceBaseline,
+        isStale: daysSinceBaseline > 14,
+        isExpired: false,
+        daysPast: 0,
+        baselineDateWasAssumed,
+        direction: 'maintain',
+        milestones: [],
+        points: [{ date: baselineDate, dateKey: toDateKey(baselineDate), projectedWeight: currentWeight }],
+      };
+    }
 
-    const minWeight = Math.min(...weights);
-    const maxWeight = Math.max(...weights);
-    const padding = Math.max((maxWeight - minWeight) * 0.25, 2);
+    const direction = goalWeight < currentWeight ? 'lose' : 'gain';
+    const weeks = deltaKg / weeklyRateKg;
+    const days = Math.max(1, Math.ceil(weeks * 7));
+    const expectedDate = addDays(baselineDate, days);
+    const isExpired = expectedDate < today;
+    const daysPast = isExpired
+      ? Math.floor((today.getTime() - expectedDate.getTime()) / 86400000)
+      : 0;
+    const isStale = daysSinceBaseline > 14;
+    const movementSign = direction === 'lose' ? -1 : 1;
+    const rateDisplayPerWeek = displayUnit === 'lbs' ? weeklyRateKg / KG_PER_LB : weeklyRateKg;
+    const baselineKg = convertWeight(currentWeight, displayUnit, 'kg');
+    const goalKg = convertWeight(goalWeight, displayUnit, 'kg');
+
+    const estimateAt = (date) => {
+      const elapsedWeeks = Math.max(0, (date.getTime() - baselineDate.getTime()) / (7 * 24 * 60 * 60 * 1000));
+      const valueKg = baselineKg + movementSign * weeklyRateKg * elapsedWeeks;
+      const boundedKg = direction === 'lose' ? Math.max(goalKg, valueKg) : Math.min(goalKg, valueKg);
+      return convertWeight(boundedKg, 'kg', displayUnit);
+    };
+
+    const milestones = [];
+    for (let month = 1; month <= 36; month += 1) {
+      const date = addMonthsClamped(baselineDate, month);
+      if (date >= expectedDate) break;
+      milestones.push({ date, weight: estimateAt(date) });
+    }
+    milestones.push({ date: expectedDate, weight: goalWeight, isGoal: true });
+
+    // Do not draw a forecast as if it were still upcoming once its target date
+    // has passed. Keep the original calculation visible as a historical estimate.
+    const points = isExpired ? [] : [
+      { date: baselineDate, dateKey: toDateKey(baselineDate), projectedWeight: currentWeight },
+      ...milestones.map((milestone) => ({
+        date: milestone.date,
+        dateKey: toDateKey(milestone.date),
+        projectedWeight: Number(milestone.weight.toFixed(1)),
+      })),
+    ];
 
     return {
-      chartData: formattedData,
-      yDomain: [
-        Math.max(0, Math.floor(minWeight - padding)),
-        Math.ceil(maxWeight + padding),
-      ],
+      alreadyReached: false,
+      expectedDate,
+      startDate: baselineDate,
+      weeks,
+      days,
+      daysSinceBaseline,
+      isStale,
+      isExpired,
+      daysPast,
+      baselineDateWasAssumed,
+      direction,
+      rateDisplayPerWeek,
+      milestones,
+      points,
     };
-  }, [logs, goalWeight]);
+  }, [currentWeight, goalWeight, weeklyRateKg, displayUnit, userSummary.lastWeighInDate, userSummary.startingWeightDate, userSummary.currentWeight, latestLog]);
+
+  const chartData = useMemo(() => {
+    const byDate = new Map();
+    for (const log of [...sortedLogsNewestFirst].reverse()) {
+      const date = new Date(log.date);
+      const dateKey = toDateKey(date);
+      const existing = byDate.get(dateKey);
+      const isLatest = String(log._id) === String(latestLog?._id);
+      const isPrevious = String(log._id) === String(previousLog?._id);
+      byDate.set(dateKey, {
+        ...existing,
+        ...log,
+        date,
+        dateKey,
+        dateStr: formatWeightDate(date, { month: 'short', day: 'numeric' }),
+        weight: Number(convertWeight(log.weight, log.unit || sourceUnit, displayUnit)?.toFixed(1)),
+        isLatest: Boolean(existing?.isLatest || isLatest),
+        isPrevious: Boolean(existing?.isPrevious || isPrevious),
+      });
+    }
+    for (const point of forecast?.points || []) {
+      const existing = byDate.get(point.dateKey) || {
+        date: point.date,
+        dateKey: point.dateKey,
+        dateStr: formatWeightDate(point.date, { month: 'short', day: 'numeric' }),
+      };
+      existing.projectedWeight = point.projectedWeight;
+      byDate.set(point.dateKey, existing);
+    }
+
+    return [...byDate.values()].sort((a, b) => a.date - b.date);
+  }, [logs, forecast, sourceUnit, displayUnit, sortedLogsNewestFirst, latestLog, previousLog]);
+
+  const latestChartPoint = chartData.find((point) => point.isLatest && Number.isFinite(point.weight));
+  const latestLogDateKey = latestLog ? toDateKey(new Date(latestLog.date)) : null;
+  const previousChartPoint = chartData.find((point) => point.isPrevious && point.dateKey !== latestLogDateKey && Number.isFinite(point.weight));
+
+  const yDomain = useMemo(() => {
+    const values = chartData.flatMap((point) => [
+      Number.isFinite(point.weight) ? point.weight : null,
+      Number.isFinite(point.projectedWeight) ? point.projectedWeight : null,
+    ]).filter((value) => value !== null);
+    if (goalWeight !== null) values.push(goalWeight);
+    if (!values.length) return [0, 100];
+    const minWeight = Math.min(...values);
+    const maxWeight = Math.max(...values);
+    const padding = Math.max((maxWeight - minWeight) * 0.2, 1);
+    return [Math.max(0, Math.floor(minWeight - padding)), Math.ceil(maxWeight + padding)];
+  }, [chartData, goalWeight]);
+
+  const handleUnitChange = async (targetUnit) => {
+    if (targetUnit === displayUnit || savingUnit) return;
+    const oldUnit = userSummary.unit || user?.weightUnit || 'kg';
+
+    if (!userId) {
+      setDisplayUnit(targetUnit);
+      return;
+    }
+
+    setSavingUnit(true);
+    setError('');
+    const profileValue = (field, fallback) => user?.[field] ?? fallback;
+    const payload = { userId, weightUnit: targetUnit };
+
+    const fields = {
+      startingWeight: profileValue('startingWeight', userSummary.startingWeight),
+      currentWeight: profileValue('currentWeight', userSummary.currentWeight),
+      weight: profileValue('weight', user?.currentWeight ?? userSummary.currentWeight),
+      goalWeight: profileValue('goalWeight', userSummary.goalWeight),
+    };
+
+    Object.entries(fields).forEach(([field, value]) => {
+      if (value !== null && value !== undefined && value !== '') {
+        payload[field] = Number(convertWeight(value, oldUnit, targetUnit).toFixed(2));
+      }
+    });
+
+    try {
+      const response = await fetch('/api/user/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.user) throw new Error(data.error || 'Unable to save unit preference.');
+
+      const updated = data.user;
+      setDisplayUnit(targetUnit);
+      setUserSummary((previous) => ({
+        ...previous,
+        startingWeight: updated.startingWeight ?? null,
+        currentWeight: updated.currentWeight ?? updated.weight ?? null,
+        goalWeight: updated.goalWeight ?? null,
+        unit: targetUnit,
+      }));
+      onUpdateUser?.(updated);
+    } catch (unitError) {
+      setError(unitError.message || 'Unable to change weight units.');
+    } finally {
+      setSavingUnit(false);
+    }
+  };
+
+  const openCurrentWeighIn = () => {
+    setNewDate(toDateKey(new Date()));
+    setNewWeight('');
+    setIsModalOpen(true);
+  };
+
 
   return (
     <div
@@ -235,10 +540,23 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
     >
       
       {/* HEADER CONTROLS BAR */}
-      <div className="grid grid-cols-2 divide-x divide-gray-800 border-b border-gray-800 bg-[#0f172a]/50 sticky top-0 z-10">
+      <div className="grid grid-cols-3 divide-x divide-gray-800 border-b border-gray-800 bg-[#0f172a]/50 sticky top-0 z-10">
         <div className="flex items-center justify-center gap-2 py-3">
           <Scale className="w-4 h-4 text-indigo-400" />
           <span className="text-xs font-semibold text-indigo-400">Weight</span>
+        </div>
+        <div className="flex items-center justify-center gap-1 py-3">
+          {['kg', 'lbs'].map((unit) => (
+            <button
+              key={unit}
+              type="button"
+              disabled={savingUnit}
+              onClick={() => handleUnitChange(unit)}
+              className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all ${displayUnit === unit ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30' : 'text-gray-400 hover:text-white'} disabled:opacity-50`}
+            >
+              {unit.toUpperCase()}
+            </button>
+          ))}
         </div>
         <div className="flex items-center justify-center gap-2 py-3">
           <Calendar className="w-4 h-4 text-gray-400" />
@@ -266,28 +584,28 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
       <div className="grid grid-cols-4 text-center px-2 py-2 border-b border-gray-800/60">
         <div>
           <div className="text-xs sm:text-base font-bold font-mono text-white tracking-tight">
-            {startWeight ?? '--'} {startWeight !== null && <span className="text-[10px] font-normal text-gray-400">{userSummary.unit}</span>}
+            {startWeight !== null ? startWeight.toFixed(1) : '--'} {startWeight !== null && <span className="text-[10px] font-normal text-gray-400">{displayUnit}</span>}
           </div>
           <div className="text-[9px] uppercase font-bold text-gray-400 tracking-wider">Start</div>
         </div>
 
         <div>
           <div className="text-xs sm:text-base font-bold font-mono text-white tracking-tight">
-            {currentWeight ?? '--'} {currentWeight !== null && <span className="text-[10px] font-normal text-gray-400">{userSummary.unit}</span>}
+            {currentWeight !== null ? currentWeight.toFixed(1) : '--'} {currentWeight !== null && <span className="text-[10px] font-normal text-gray-400">{displayUnit}</span>}
           </div>
           <div className="text-[9px] uppercase font-bold text-gray-400 tracking-wider">Current</div>
         </div>
 
         <div>
           <div className="text-xs sm:text-base font-bold font-mono text-indigo-400 tracking-tight">
-            {goalWeight ?? '--'} {goalWeight !== null && <span className="text-[10px] font-normal text-indigo-400/70">{userSummary.unit}</span>}
+            {goalWeight !== null ? goalWeight.toFixed(1) : '--'} {goalWeight !== null && <span className="text-[10px] font-normal text-indigo-400/70">{displayUnit}</span>}
           </div>
           <div className="text-[9px] uppercase font-bold text-indigo-400/80 tracking-wider">Goal</div>
         </div>
 
         <div>
           <div className={`text-xs sm:text-base font-bold font-mono tracking-tight ${diff === null ? 'text-gray-500' : Number(diff) <= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-            {diff === null ? '--' : Number(diff) > 0 ? `+${diff}` : diff} {diff !== null && <span className="text-[10px] font-normal text-gray-400">{userSummary.unit}</span>}
+            {diff === null ? '--' : Number(diff) > 0 ? `+${diff}` : diff} {diff !== null && <span className="text-[10px] font-normal text-gray-400">{displayUnit}</span>}
           </div>
           <div className="text-[9px] uppercase font-bold text-gray-400 tracking-wider">
             {pct !== null ? `Change (${pct}%)` : 'No data yet'}
@@ -295,9 +613,72 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
         </div>
       </div>
 
-      {/* RECHARTS WEIGHT LINE GRAPH */}
+      {/* COMPACT LATEST WEIGHT UPDATE */}
+      {latestMeasurement && (
+        <div className="mx-4 rounded-xl border border-gray-800 bg-[#0D1524] overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowWeightDetails((value) => !value)}
+            aria-expanded={showWeightDetails}
+            aria-controls="weight-update-details"
+            className="w-full flex items-center justify-between gap-3 px-3.5 py-3 text-left hover:bg-[#121D30] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-400 transition-colors"
+            title="Show previous weigh-in and weight change"
+          >
+            <div className="min-w-0">
+              <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400">
+                {latestLog ? 'Latest weigh-in' : 'Current profile weight'}
+              </p>
+              <p className="mt-0.5 text-[10px] text-gray-500 truncate">
+                {latestMeasurementDate ? formatWeightDate(latestMeasurementDate) : 'Measurement date not recorded'}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-base font-bold font-mono text-white">
+                {latestMeasurementWeight?.toFixed(1)} <span className="text-[10px] text-gray-400">{displayUnit}</span>
+              </span>
+              <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${showWeightDetails ? 'rotate-180' : ''}`} />
+            </div>
+          </button>
+          {showWeightDetails && (
+            <div id="weight-update-details" className="border-t border-gray-800 px-3.5 py-3 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[10px] text-gray-400">Latest recorded weight</span>
+                <span className="text-[10px] font-semibold text-white">{latestMeasurementWeight?.toFixed(1)} {displayUnit}</span>
+              </div>
+              {previousLog ? (
+                <>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[10px] text-gray-400">Previous weigh-in · {formatWeightDate(parseLocalDate(previousLog.date))}</span>
+                    <span className="text-[10px] font-semibold text-white">{previousLogWeight?.toFixed(1)} {displayUnit}</span>
+                  </div>
+                  {changeSincePrevious !== null && (
+                    <div className="flex items-center justify-between gap-3 border-t border-gray-800 pt-2">
+                      <span className="text-[10px] text-gray-400">Change since previous</span>
+                      <span className={`text-[10px] font-bold ${changeSincePrevious < 0 ? 'text-emerald-300' : changeSincePrevious > 0 ? 'text-amber-300' : 'text-gray-300'}`}>
+                        {changeSincePrevious > 0 ? '+' : ''}{changeSincePrevious.toFixed(1)} {displayUnit}
+                        {changeSincePrevious < 0 ? ' down' : changeSincePrevious > 0 ? ' up' : ' no change'}
+                      </span>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-[10px] text-gray-500">
+                  No earlier weigh-in is recorded yet. Add another entry to compare your progress.
+                </p>
+              )}
+              {latestMeasurementDate && (
+                <p className="text-[9px] text-gray-500">
+                  Last measurement was {Math.max(0, Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(latestMeasurementDate).setHours(0, 0, 0, 0)) / 86400000))} days ago.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* WEIGHT HISTORY + PROJECTED GOAL LINE */}
       <div className="px-4 pt-2">
-        <div className="h-48 w-full relative">
+        <div className="h-52 w-full relative">
           {loading ? (
             <div className="h-full flex items-center justify-center">
               <Loader2 className="w-5 h-5 animate-spin text-indigo-400" />
@@ -311,51 +692,77 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
                     <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <XAxis 
-                  dataKey="dateStr" 
-                  stroke="#64748b" 
-                  fontSize={10} 
-                  tickLine={false} 
-                  axisLine={{ stroke: '#1e293b' }} 
-                />
-                <YAxis 
-                  stroke="#64748b" 
-                  fontSize={9} 
-                  tickLine={false} 
-                  axisLine={false}
-                  domain={yDomain}
-                />
-                <Tooltip 
+                <XAxis dataKey="dateStr" stroke="#64748b" fontSize={10} tickLine={false} axisLine={{ stroke: '#1e293b' }} />
+                <YAxis stroke="#64748b" fontSize={9} tickLine={false} axisLine={false} domain={yDomain} />
+                <Tooltip
                   content={({ active, payload }) => {
-                    if (active && payload && payload.length) {
+                    if (active && payload?.length) {
+                      const point = payload[0]?.payload || {};
+                      const value = point.projectedWeight ?? point.weight;
+                      if (value === undefined || value === null) return null;
                       return (
                         <div className="bg-[#0f172a] border border-gray-700 p-2 rounded-lg text-xs font-mono shadow-lg">
-                          <span className="text-indigo-400 font-bold">{payload[0].value}</span> {userSummary.unit}
+                          <span className="text-indigo-400 font-bold">{Number(value).toFixed(1)}</span> {displayUnit}
+                          {point.projectedWeight !== undefined && <span className="block text-[10px] text-gray-400 mt-1">Projected</span>}
                         </div>
                       );
                     }
                     return null;
                   }}
                 />
-
-                {goalWeight > 0 && (
-                  <ReferenceLine 
-                    y={goalWeight} 
-                    stroke="#818cf8" 
-                    strokeDasharray="3 3" 
-                    label={{ value: 'GOAL', fill: '#818cf8', fontSize: 9, position: 'insideTopRight' }} 
+                {previousChartPoint && (
+                  <ReferenceDot
+                    x={previousChartPoint.dateStr}
+                    y={previousChartPoint.weight}
+                    r={5}
+                    fill="#60a5fa"
+                    stroke="#0f172a"
+                    strokeWidth={2}
+                    label={{ value: 'PREVIOUS', fill: '#93c5fd', fontSize: 8, position: 'bottom' }}
                   />
                 )}
-
-                <Area 
-                  type="monotone" 
-                  dataKey="weight" 
-                  stroke="#6366f1" 
-                  strokeWidth={2.5} 
-                  fillOpacity={1} 
-                  fill="url(#weightGradient)" 
+                {latestChartPoint && (
+                  <ReferenceDot
+                    x={latestChartPoint.dateStr}
+                    y={latestChartPoint.weight}
+                    r={6}
+                    fill="#34d399"
+                    stroke="#0f172a"
+                    strokeWidth={2}
+                    label={{ value: 'LATEST', fill: '#6ee7b7', fontSize: 8, position: 'top' }}
+                  />
+                )}
+                {goalWeight > 0 && (
+                  <ReferenceLine
+                    y={goalWeight}
+                    stroke="#818cf8"
+                    strokeDasharray="3 3"
+                    label={{ value: 'GOAL', fill: '#818cf8', fontSize: 9, position: 'insideTopRight' }}
+                  />
+                )}
+                <Area
+                  type="monotone"
+                  dataKey="weight"
+                  stroke="#6366f1"
+                  strokeWidth={2.5}
+                  fillOpacity={1}
+                  fill="url(#weightGradient)"
                   activeDot={{ r: 5, fill: '#6366f1', stroke: '#fff', strokeWidth: 1.5 }}
+                  connectNulls={false}
                 />
+                {forecast && !forecast.alreadyReached && !forecast.isExpired && (
+                  <Line
+                    type="monotone"
+                    dataKey="projectedWeight"
+                    name="Projected"
+                    stroke="#a5b4fc"
+                    strokeWidth={2}
+                    strokeDasharray="5 5"
+                    dot={false}
+                    activeDot={{ r: 4, fill: '#a5b4fc', stroke: '#fff', strokeWidth: 1 }}
+                    connectNulls
+                  />
+                )}
               </AreaChart>
             </ResponsiveContainer>
           ) : (
@@ -364,13 +771,143 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
             </div>
           )}
         </div>
+        <div className="flex items-center justify-center gap-4 text-[9px] text-gray-500 mt-1">
+          <span className="flex items-center gap-1.5"><span className="inline-block w-4 h-0.5 bg-indigo-500" /> Recorded</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block w-4 h-0.5 border-t border-dashed border-indigo-300" /> Projection</span>
+        </div>
+      </div>
+
+      {/* GOAL TIMELINE */}
+      <div className="mx-4 rounded-2xl border border-gray-800 bg-[#0D1524] p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-xs font-bold text-white">Goal timeline</h3>
+            <p className="text-[10px] text-gray-500 mt-0.5">Calculated from your latest recorded weight and the pace saved in Goals</p>
+          </div>
+          <div className="text-right">
+            <p className="text-[9px] text-gray-500 mb-1">Weekly pace · Goals</p>
+            <p className="text-[10px] font-bold text-indigo-300">
+              {(displayUnit === 'lbs' ? weeklyRateKg / KG_PER_LB : weeklyRateKg).toFixed(2)} {displayUnit}/week
+            </p>
+            <button
+              type="button"
+              onClick={onNavigateToGoals}
+              className="mt-1 text-[9px] font-semibold text-gray-400 underline underline-offset-2 hover:text-white"
+            >
+              Edit in Goals
+            </button>
+          </div>
+        </div>
+
+        {forecast?.alreadyReached ? (
+          <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-3">
+            <p className="text-xs font-bold text-emerald-300">Your recorded weight matches your goal.</p>
+            <p className="text-[10px] text-gray-400 mt-1">
+              {forecast.isStale
+                ? `This measurement is ${forecast.daysSinceBaseline} days old. Log a new weight to confirm your current progress.`
+                : 'Keep logging your weight to track how it changes over time.'}
+            </p>
+            <button type="button" onClick={openCurrentWeighIn} className="mt-2 text-[10px] font-bold text-indigo-300 hover:text-white">
+              Log current weight
+            </button>
+          </div>
+        ) : forecast?.isExpired ? (
+          <div className="rounded-xl bg-amber-500/10 border border-amber-500/25 p-3 space-y-2">
+            <div>
+              <p className="text-xs font-bold text-amber-300">Previous estimate has passed</p>
+              <p className="text-sm font-bold text-white mt-1">{formatWeightDate(forecast.expectedDate)}</p>
+              <p className="text-[10px] text-amber-200/80">
+                That date was {forecast.daysPast} {forecast.daysPast === 1 ? 'day' : 'days'} ago.
+              </p>
+            </div>
+            <p className="text-[10px] leading-relaxed text-gray-300">
+              This estimate was calculated from {currentWeight.toFixed(1)} {displayUnit} on {formatWeightDate(forecast.startDate)}.
+              {forecast.daysSinceBaseline > 0 ? ` The last measurement is now ${forecast.daysSinceBaseline} days old.` : ''}
+              {' '}NutriAI cannot know your current weight without a newer measurement, so it will not invent a new completion date.
+            </p>
+            <p className="text-[10px] text-gray-400">
+              Original estimated duration: {formatWeekDayDuration(forecast.days)} ({forecast.days} days).
+            </p>
+            <button
+              type="button"
+              onClick={openCurrentWeighIn}
+              className="w-full rounded-lg bg-amber-400/15 border border-amber-400/25 px-3 py-2 text-[10px] font-bold text-amber-200 hover:bg-amber-400/20 transition-colors"
+            >
+              Log a new weight to refresh estimate
+            </button>
+          </div>
+        ) : forecast ? (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl bg-[#121A2A] border border-gray-800 p-3">
+                <p className="text-[9px] text-gray-500 uppercase tracking-wide">Estimated goal date</p>
+                <p className="text-sm font-bold text-indigo-300 mt-1">{formatWeightDate(forecast.expectedDate)}</p>
+              </div>
+              <div className="rounded-xl bg-[#121A2A] border border-gray-800 p-3">
+                <p className="text-[9px] text-gray-500 uppercase tracking-wide">Time from last weight</p>
+                <p className="text-sm font-bold text-white mt-1">{formatWeekDayDuration(forecast.days)}</p>
+                <p className="text-[9px] text-gray-500 mt-0.5">
+                  {formatCalendarDuration(forecast.startDate, forecast.expectedDate)} · {forecast.days} days total
+                </p>
+              </div>
+            </div>
+            <p className="text-[10px] text-gray-400">
+              Starting at {currentWeight.toFixed(1)} {displayUnit} on {formatWeightDate(forecast.startDate)} ·
+              {' '}{forecast.direction === 'lose' ? 'losing' : 'gaining'} about {forecast.rateDisplayPerWeek.toFixed(2)} {displayUnit}/week.
+            </p>
+            {forecast.isStale && (
+              <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 space-y-1">
+                <p className="text-[10px] font-bold text-amber-300">Your weight record may be out of date</p>
+                <p className="text-[10px] text-gray-400">
+                  The last measurement was {forecast.daysSinceBaseline} days ago. Log a new weight to refresh the goal estimate.
+                </p>
+                <button type="button" onClick={openCurrentWeighIn} className="text-[10px] font-bold text-amber-200 hover:text-white">
+                  Update weight
+                </button>
+              </div>
+            )}
+            {forecast.baselineDateWasAssumed && (
+              <p className="text-[10px] text-amber-300">
+                No measurement date is saved. This estimate starts today using the current profile weight.
+              </p>
+            )}
+            {userSummary.nutritionalStrategy && (
+              <p className="text-[10px] text-gray-500">
+                Nutritional strategy: <span className="text-gray-300 capitalize">{userSummary.nutritionalStrategy}</span>
+              </p>
+            )}
+            <div className="border-t border-gray-800 pt-3 space-y-2">
+              <p className="text-[9px] font-bold uppercase tracking-wider text-gray-500">Monthly milestones</p>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+                {forecast.milestones.map((milestone, index) => (
+                  <div key={index} className="flex items-center justify-between gap-2 text-[10px]">
+                    <span className={milestone.isGoal ? 'text-indigo-300 font-bold' : 'text-gray-400'}>
+                      {formatWeightDate(milestone.date, { month: 'short', day: 'numeric' })}
+                      {milestone.isGoal ? ' · Goal' : ''}
+                    </span>
+                    <span className="text-white font-mono">{milestone.weight.toFixed(1)} {displayUnit}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        ) : (
+          <p className="text-[10px] text-gray-400">
+            Add a current weight and goal weight in Goals to see your estimated date and monthly milestones.
+          </p>
+        )}
+
+        <p className="text-[9px] leading-relaxed text-gray-500">
+          This is a straight-line estimate, not a promise. Actual progress varies with nutrition, activity, health, and normal weight fluctuations.
+          The selected pace is a planning assumption, not a nutrition recommendation. A suitable pace depends on the person's health and circumstances.
+        </p>
       </div>
 
       {/* ENTRIES LIST HEADER */}
       <div className="px-5 pt-4 pb-1 border-b border-gray-800/60 flex items-center justify-between">
         <h3 className="text-xs font-bold text-gray-300 uppercase tracking-wider">Entries</h3>
         <button 
-          onClick={() => setIsModalOpen(true)}
+          onClick={openCurrentWeighIn}
           className="p-1 rounded-lg text-indigo-400 hover:bg-indigo-500/10 transition-colors"
           title="Add weight entry"
         >
@@ -380,34 +917,39 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
 
       {/* DETAILED LOGS LIST */}
       <div className="divide-y divide-gray-800/50">
-        {logs.map((log) => (
-          <div key={log._id} className="px-5 py-3.5 flex items-center justify-between hover:bg-[#161F30] transition-colors">
-            <div>
-              <div className="text-xs font-semibold text-gray-200">
-                {new Date(log.date).toLocaleDateString('en-US', {
-                  weekday: 'long',
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric',
-                })}
+        {logs.map((log) => {
+          const convertedWeight = convertWeight(log.weight, log.unit || userSummary.unit, displayUnit);
+          return (
+            <div key={log._id} className="px-5 py-3.5 flex items-center justify-between hover:bg-[#161F30] transition-colors">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="text-xs font-semibold text-gray-200">
+                    {new Date(log.date).toLocaleDateString('en-US', {
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric',
+                    })}
+                  </div>
+                  {String(log._id) === String(latestLog?._id) && (
+                    <span className="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[8px] font-bold text-emerald-300">LATEST</span>
+                  )}
+                  {String(log._id) === String(previousLog?._id) && (
+                    <span className="rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[8px] font-bold text-blue-300">PREVIOUS</span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center space-x-3">
+                <span className="text-xs font-bold font-mono text-gray-100">
+                  {convertedWeight?.toFixed(1)} {displayUnit}
+                </span>
+                <button onClick={() => handleDeleteLog(log._id)} className="text-gray-600 hover:text-red-400 transition-colors" title="Delete weight entry">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
               </div>
             </div>
-
-            <div className="flex items-center space-x-3">
-              <span className="text-xs font-bold font-mono text-gray-100">
-                {log.weight} {log.unit || userSummary.unit}
-              </span>
-              {log.photoUrl ? (
-                <img src={log.photoUrl} alt="Progress" className="w-7 h-7 rounded object-cover border border-gray-700" />
-              ) : (
-                <ImageIcon className="w-4 h-4 text-gray-600" />
-              )}
-              <button onClick={() => handleDeleteLog(log._id)} className="text-gray-600 hover:text-red-400 transition-colors">
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* LOG WEIGHT MODAL OVERLAY */}
@@ -421,7 +963,7 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
 
             <form onSubmit={handleAddLog} className="space-y-3 text-xs">
               <div>
-                <label className="block text-gray-400 mb-1 font-medium">Weight ({userSummary.unit})</label>
+                <label className="block text-gray-400 mb-1 font-medium">Weight ({displayUnit})</label>
                 <input
                   type="number"
                   step="0.1"
@@ -446,17 +988,6 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
                 {dateError && (
                   <span className="text-[10px] text-red-400 mt-1 block">{dateError}</span>
                 )}
-              </div>
-
-              <div>
-                <label className="block text-gray-400 mb-1 font-medium">Photo URL (Optional)</label>
-                <input
-                  type="url"
-                  value={newPhoto}
-                  onChange={(e) => setNewPhoto(e.target.value)}
-                  placeholder="https://..."
-                  className="w-full bg-[#121A2A] border border-gray-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
-                />
               </div>
 
               <button
