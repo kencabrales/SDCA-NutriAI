@@ -176,6 +176,26 @@ export default function CreateFoodModal({
       vitaminB12Goal: parseNum(form.vitaminB12),
       vitaminDGoal: parseNum(form.vitaminD)
     };
+ 
+    const notifySaved = (food) => {
+      onSuccess?.(food);
+      onFoodCreated?.(food);
+    };
+
+    if (!foodToEdit && !navigator.onLine) {
+      try {
+        const localFood = await saveCustomFoodOffline(userId, payload);
+        showToastNotification?.('Food Saved Offline', `"${payload.foodName}" is saved on this device and will sync when online.`, 'success');
+        notifySaved(localFood);
+        handleClose();
+      } catch (error) {
+        console.error('Offline custom food save failed:', error);
+        showToastNotification?.('Offline Save Failed', 'Could not save this food on your device.', 'error');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
 
     try {
       const res = await fetch('/api/custom-food', {
@@ -193,6 +213,11 @@ export default function CreateFoodModal({
         );
         if (!foodToEdit) await cacheFoods(userId, [data.food || payload]);
         notifySaved(data.food || payload);
+        handleClose();
+      } else if (!foodToEdit && res.status >= 500) {
+        const localFood = await saveCustomFoodOffline(userId, payload);
+        showToastNotification?.('Food Saved Offline', `"${payload.foodName}" is saved on this device and will sync when online.`, 'success');
+        notifySaved(localFood);
         handleClose();
       } else {
         showToastNotification?.('Error', data.message || 'Failed to save custom food.', 'error');

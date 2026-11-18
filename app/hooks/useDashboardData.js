@@ -3,6 +3,7 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { getLogs, cacheLogs, getWater, saveWater } from '@/lib/offlineStore';
 import {
   getTodayPH,
   dateStringToUTCAnchor,
@@ -71,66 +72,71 @@ export function useDashboardData() {
   // --- DATA FETCHING ---
   const fetchDashboardData = useCallback(async (userId, dateStr) => {
     if (!userId) return;
-    
+
+    // Render the last saved local snapshot first. It remains usable when the
+    // device is offline or Atlas DNS/server selection is temporarily failing.
+    const cachedLogs = await getLogs(userId, dateStr).catch(() => []);
+    setTodayLogs(cachedLogs);
+    const cachedWater = await getWater(userId, dateStr).catch(() => 0);
+    setTodayWater(cachedWater);
+
+    const savedSteps = localStorage.getItem(`steps_${userId}_${dateStr}`);
+    setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
+
+    if (!navigator.onLine) {
+      if (cachedLogs.length) {
+        setLoggedDates((previous) => previous.includes(dateStr) ? previous : [...previous, dateStr]);
+      }
+      return;
+    }
+
     try {
-      const res = await fetch(`/api/food-log?userId=${userId}&date=${dateStr}`);
+      const res = await fetch(`/api/food-log?userId=${encodeURIComponent(userId)}&date=${dateStr}`);
       if (res.ok) {
         const data = await res.json();
-        setTodayLogs(data.logs || []);
-      } else {
-        setTodayLogs([]);
+        await cacheLogs(userId, dateStr, data.logs || []).catch(() => {});
+        setTodayLogs(await getLogs(userId, dateStr).catch(() => data.logs || []));
       }
 
-try {
-  const waterRes = await fetch(`/api/water-log?userId=${encodeURIComponent(userId)}&date=${dateStr}`, { cache: 'no-store' });
-  const waterData = await waterRes.json().catch(() => ({}));
-  if (waterRes.ok && waterData.log) {
-    setTodayWater(Number(waterData.log.amountMl) || 0);
-  } else if (waterRes.ok) {
-    const legacyValue = localStorage.getItem(`water_${userId}_${dateStr}`);
-    const legacyAmount = Number.parseInt(legacyValue || '0', 10);
-    if (legacyAmount > 0) {
-      const migrateRes = await fetch('/api/water-log', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, date: dateStr, amountMl: legacyAmount, mode: 'set' }),
-      });
-      const migrated = await migrateRes.json().catch(() => ({}));
-      if (migrateRes.ok) {
-        setTodayWater(Number(migrated.log?.amountMl) || legacyAmount);
-        localStorage.removeItem(`water_${userId}_${dateStr}`);
-      } else setTodayWater(0);
-    } else setTodayWater(0);
-  } else setTodayWater(0);
-} catch (waterError) {
-  console.error('Failed to load water intake:', waterError);
-  setTodayWater(0);
-}
+      try {
+        const waterRes = await fetch(`/api/water-log?userId=${encodeURIComponent(userId)}&date=${dateStr}`, { cache: 'no-store' });
+        if (waterRes.ok) {
+          const waterData = await waterRes.json().catch(() => ({}));
+          const amount = Number(waterData.log?.amountMl) || 0;
+          setTodayWater(amount);
+          await saveWater(userId, dateStr, amount, false).catch(() => {});
+        }
+      } catch (waterError) {
+        console.warn('Water data is unavailable; retaining the local copy.', waterError);
+      }
 
-const savedSteps = localStorage.getItem(`steps_${userId}_${dateStr}`);
-setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
-
-      // Fetch 60 days of history using explicit start/end dates to keep past dots working
       const dateAnchor = dateStringToUTCAnchor(dateStr);
-      const rangeEndAnchor = addDaysUTC(dateAnchor, 14); // Cover future week dates
-      const rangeStartAnchor = addDaysUTC(dateAnchor, -60); // Cover 60 days into the past
-
+      const rangeEndAnchor = addDaysUTC(dateAnchor, 14);
+      const rangeStartAnchor = addDaysUTC(dateAnchor, -60);
       const startStr = utcAnchorToDateString(rangeStartAnchor);
       const endStr = utcAnchorToDateString(rangeEndAnchor);
 
-      const historyRes = await fetch(`/api/food-log/history?userId=${userId}&start=${startStr}&end=${endStr}`);
-      if (historyRes.ok) {
-        const historyData = await historyRes.json();
-        setLoggedDates(historyData.loggedDates || []);
+      try {
+        const historyRes = await fetch(`/api/food-log/history?userId=${encodeURIComponent(userId)}&start=${startStr}&end=${endStr}`);
+        if (historyRes.ok) {
+          const historyData = await historyRes.json();
+          setLoggedDates(historyData.loggedDates || []);
+        }
+      } catch (historyError) {
+        console.warn('Food history is unavailable offline; retaining the local view.', historyError);
       }
 
-      const streakRes = await fetch(`/api/user/streak?userId=${userId}`);
-      if (streakRes.ok) {
-        const streakData = await streakRes.json();
-        setStreakCount(streakData.streak || 0);
+      try {
+        const streakRes = await fetch(`/api/user/streak?userId=${encodeURIComponent(userId)}`);
+        if (streakRes.ok) {
+          const streakData = await streakRes.json();
+          setStreakCount(streakData.streak || 0);
+        }
+      } catch (streakError) {
+        console.warn('Streak data is unavailable; retaining the last value.', streakError);
       }
     } catch (err) {
-      console.error("Failed to load dashboard data:", err);
-      setTodayLogs([]);
+      console.warn('Dashboard sync unavailable; showing locally cached data.', err);
     }
   }, []);
 
@@ -139,6 +145,11 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
     { forceRefresh = false, generate = true, silent = false } = {}
   ) => {
     if (!userId || insightsRequestInFlight.current) return;
+    if (!navigator.onLine) {
+      setInsightsMessage('AI analysis needs an internet connection. Your saved nutrition data is still available offline.');
+      setInsightsError('');
+      return;
+    }
     insightsRequestInFlight.current = true;
     if (!silent) setIsLoadingInsights(true);
     if (!silent) setInsightsError('');
@@ -237,25 +248,47 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
 const handleWaterAdd = async (amount) => {
   const uid = user?.id || user?._id;
   if (!uid || !Number.isFinite(Number(amount))) return;
+
   const previousWater = todayWater;
   const updated = Math.max(0, previousWater + Number(amount));
   setTodayWater(updated);
+
+  if (!navigator.onLine) {
+    await saveWater(uid, selectedDate, updated, true).catch((error) => {
+      console.error('Could not save water intake locally:', error);
+      setTodayWater(previousWater);
+    });
+    return;
+  }
+
   try {
     const res = await fetch('/api/water-log', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        userId: uid, date: selectedDate, amountMl: Math.abs(Number(amount)),
+        userId: uid,
+        date: selectedDate,
+        amountMl: Number(amount) < 0 ? updated : Number(amount),
         mode: Number(amount) < 0 ? 'set' : 'increment',
-        ...(Number(amount) < 0 ? { amountMl: updated } : {}),
       }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'Could not save water intake');
-    setTodayWater(Number(data.log?.amountMl) || 0);
+    if (!res.ok) {
+      const error = new Error(data.error || 'Could not save water intake');
+      error.status = res.status;
+      throw error;
+    }
+    const total = Number(data.log?.amountMl) || 0;
+    setTodayWater(total);
+    await saveWater(uid, selectedDate, total, false).catch(() => {});
   } catch (error) {
-    console.error('Water logging failed:', error);
-    setTodayWater(previousWater);
+    console.warn('Water sync failed; preserving the local amount.', error);
+    if (!navigator.onLine || error instanceof TypeError || error.status >= 500) {
+      await saveWater(uid, selectedDate, updated, true);
+      setTodayWater(updated);
+    } else {
+      setTodayWater(previousWater);
+    }
   }
 };
 

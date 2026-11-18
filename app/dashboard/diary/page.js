@@ -101,15 +101,14 @@ const fetchWaterForDate = useCallback(async (userId, dateStr) => {
     }
     setWaterAmount(0);
   } catch (error) {
-    console.error('Failed to load water log:', error);
-    setWaterAmount(0);
+    console.warn('Water service unavailable; keeping locally cached intake.', error);
   }
 }, []);
 
 const fetchDailyLogs = useCallback(async (userId, dateStr) => {
   if (!dateStr || !userId) return;
   const cached = await getLogs(userId, dateStr).catch(() => []);
-  if (cached.length) setLogs(cached);
+  setLogs(cached);
   if (!navigator.onLine) return;
   try {
     const res = await fetch(`/api/food-log?userId=${userId}&date=${dateStr}`);
@@ -221,37 +220,78 @@ useEffect(() => {
     if (!currentDate || !user) return;
     setLoading(true);
     const userId = user.id || user._id;
-    const clientMutationId = crypto.randomUUID ? crypto.randomUUID() : `offline-${Date.now()}-${Math.random()}`;
+    const clientMutationId = foodPayload.clientMutationId ||
+      (typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `offline-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const queuedPayload = { ...foodPayload, clientMutationId };
-    if (!navigator.onLine) { try { const localLog = await saveLogOffline(userId, currentDate, queuedPayload); setLogs(previous => [...previous, localLog]); showToastNotification('Saved Offline', 'Food entry saved on this device and will sync when online.', 'success'); } catch (error) { showToastNotification('Offline Save Failed', 'Could not save this entry on your device.', 'error'); } finally { setLoading(false); } return; }
+
+    const saveLocally = async () => {
+      const localLog = await saveLogOffline(userId, currentDate, queuedPayload);
+      setLogs((previous) => [...previous.filter((item) => item.clientMutationId !== clientMutationId), localLog]);
+      showToastNotification('Saved Offline', 'Food entry saved on this device and will sync when online.', 'success');
+    };
+
+    if (!navigator.onLine) {
+      try {
+        await saveLocally();
+      } catch (error) {
+        console.error('Offline food log save failed:', error);
+        showToastNotification('Offline Save Failed', 'Could not save this entry on your device.', 'error');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     try {
       const res = await fetch('/api/food-log', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, date: currentDate, ...queuedPayload })
+        body: JSON.stringify({ userId, date: currentDate, ...queuedPayload }),
       });
 
-if (res.ok) {
-  const savedData = await res.json().catch(() => ({}));
-  if (savedData.log) await cacheLogs(userId, currentDate, [savedData.log]).catch(() => {});
-  fetchDailyLogs(userId, currentDate);
-  // Logging food does not trigger another AI request; keep the daily insight cached.
-  const userRes = await fetch(`/api/user/profile?userId=${user.id || user._id}`);
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        if (res.status >= 500) {
+          await saveLocally();
+        } else {
+          showToastNotification('Error Logging Food', errorData.message || errorData.error || 'Failed to log food entry.', 'error');
+        }
+        return;
+      }
+
+      const savedData = await res.json().catch(() => ({}));
+      if (savedData.log) await cacheLogs(userId, currentDate, [savedData.log]).catch(() => {});
+      await fetchDailyLogs(userId, currentDate);
+
+      // Profile refresh is secondary; it must not cause a successfully logged
+      // food to be queued and submitted a second time.
+      try {
+        const userRes = await fetch(`/api/user/profile?userId=${encodeURIComponent(userId)}`);
         if (userRes.ok) {
           const updatedUserData = await userRes.json();
           const newUserObj = { ...user, ...updatedUserData };
           setUser(newUserObj);
           localStorage.setItem('user', JSON.stringify(newUserObj));
         }
-
-        showToastNotification('Food Logged!', `Added to ${foodPayload.mealType || activeMealType}.`, 'success');
-      } else {
-        const errorData = await res.json().catch(() => ({}));
-        showToastNotification('Error Logging Food', errorData.message || 'Failed to log food entry.', 'error');
+      } catch (profileError) {
+        console.warn('Food was logged, but profile refresh is unavailable.', profileError);
       }
+
+      showToastNotification('Food Logged!', `Added to ${foodPayload.mealType || activeMealType}.`, 'success');
     } catch (err) {
-      console.error(err);
-      if (err instanceof TypeError || !navigator.onLine) { try { const localLog = await saveLogOffline(userId, currentDate, queuedPayload); setLogs(previous => [...previous, localLog]); showToastNotification('Saved Offline', 'Food entry saved on this device and will sync when online.', 'success'); } catch { showToastNotification('Offline Save Failed', 'Could not save this entry on your device.', 'error'); } } else showToastNotification('Network Error', 'Could not connect to the server.', 'error');
+      console.warn('Food log request failed:', err);
+      if (err instanceof TypeError || !navigator.onLine) {
+        try {
+          await saveLocally();
+        } catch (storageError) {
+          console.error('Offline food log save failed:', storageError);
+          showToastNotification('Offline Save Failed', 'Could not save this entry on your device.', 'error');
+        }
+      } else {
+        showToastNotification('Network Error', 'Could not connect to the server.', 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -358,19 +398,45 @@ if (res.ok) {
   const quickLogWater = async (amountInMl) => {
     const userId = user?.id || user?._id;
     if (!currentDate || !userId || !Number.isFinite(Number(amountInMl)) || Number(amountInMl) <= 0 || isSavingWater) return;
+
     setIsSavingWater(true);
+    const updatedAmount = waterAmount + Number(amountInMl);
     try {
+      if (!navigator.onLine) {
+        await saveWater(userId, currentDate, updatedAmount, true);
+        setWaterAmount(updatedAmount);
+        showToastNotification('Water Saved Offline', 'Your water intake will sync when online.', 'success');
+        return;
+      }
+
       const response = await fetch('/api/water-log', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId, date: currentDate, amountMl: Number(amountInMl), mode: 'increment' }),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || 'Could not save water intake');
-      setWaterAmount(Number(data.log?.amountMl) || 0);
+      if (!response.ok) {
+        const error = new Error(data.error || 'Could not save water intake');
+        error.status = response.status;
+        throw error;
+      }
+      const total = Number(data.log?.amountMl) || 0;
+      setWaterAmount(total);
+      await saveWater(userId, currentDate, total, false).catch(() => {});
       showToastNotification('Hydration Tracked', `+${amountInMl} ml water added.`, 'success');
     } catch (error) {
-      showToastNotification('Water Not Saved', error.message || 'Please try again.', 'error');
+      if (!navigator.onLine || error instanceof TypeError || error.status >= 500) {
+        try {
+          await saveWater(userId, currentDate, updatedAmount, true);
+          setWaterAmount(updatedAmount);
+          showToastNotification('Water Saved Offline', 'Your water intake will sync when online.', 'success');
+        } catch (storageError) {
+          console.error('Local water save failed:', storageError);
+          showToastNotification('Water Not Saved', 'Could not save water intake on this device.', 'error');
+        }
+      } else {
+        showToastNotification('Water Not Saved', error.message || 'Please try again.', 'error');
+      }
     } finally {
       setIsSavingWater(false);
     }
