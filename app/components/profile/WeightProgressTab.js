@@ -503,28 +503,28 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
       <div className="grid grid-cols-4 text-center px-2 py-2 border-b border-gray-800/60">
         <div>
           <div className="text-xs sm:text-base font-bold font-mono text-white tracking-tight">
-            {startWeight ?? '--'} {startWeight !== null && <span className="text-[10px] font-normal text-gray-400">{userSummary.unit}</span>}
+            {startWeight !== null ? startWeight.toFixed(1) : '--'} {startWeight !== null && <span className="text-[10px] font-normal text-gray-400">{displayUnit}</span>}
           </div>
           <div className="text-[9px] uppercase font-bold text-gray-400 tracking-wider">Start</div>
         </div>
 
         <div>
           <div className="text-xs sm:text-base font-bold font-mono text-white tracking-tight">
-            {currentWeight ?? '--'} {currentWeight !== null && <span className="text-[10px] font-normal text-gray-400">{userSummary.unit}</span>}
+            {currentWeight !== null ? currentWeight.toFixed(1) : '--'} {currentWeight !== null && <span className="text-[10px] font-normal text-gray-400">{displayUnit}</span>}
           </div>
           <div className="text-[9px] uppercase font-bold text-gray-400 tracking-wider">Current</div>
         </div>
 
         <div>
           <div className="text-xs sm:text-base font-bold font-mono text-indigo-400 tracking-tight">
-            {goalWeight ?? '--'} {goalWeight !== null && <span className="text-[10px] font-normal text-indigo-400/70">{userSummary.unit}</span>}
+            {goalWeight !== null ? goalWeight.toFixed(1) : '--'} {goalWeight !== null && <span className="text-[10px] font-normal text-indigo-400/70">{displayUnit}</span>}
           </div>
           <div className="text-[9px] uppercase font-bold text-indigo-400/80 tracking-wider">Goal</div>
         </div>
 
         <div>
           <div className={`text-xs sm:text-base font-bold font-mono tracking-tight ${diff === null ? 'text-gray-500' : Number(diff) <= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-            {diff === null ? '--' : Number(diff) > 0 ? `+${diff}` : diff} {diff !== null && <span className="text-[10px] font-normal text-gray-400">{userSummary.unit}</span>}
+            {diff === null ? '--' : Number(diff) > 0 ? `+${diff}` : diff} {diff !== null && <span className="text-[10px] font-normal text-gray-400">{displayUnit}</span>}
           </div>
           <div className="text-[9px] uppercase font-bold text-gray-400 tracking-wider">
             {pct !== null ? `Change (${pct}%)` : 'No data yet'}
