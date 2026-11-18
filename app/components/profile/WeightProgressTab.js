@@ -104,7 +104,7 @@ function formatCalendarDuration(startDate, endDate) {
   return parts.join(', ') || 'Less than a month';
 }
 
-export default function WeightProgressTab({ user, onUpdateUser }) {
+export default function WeightProgressTab({ user, onUpdateUser, onNavigateToGoals }) {
   const isPreviewMode = !(user?._id || user?.id);
   const userId = user?._id || user?.id;
 
@@ -124,7 +124,6 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
   const [displayUnit, setDisplayUnit] = useState(user?.weightUnit === 'lbs' ? 'lbs' : 'kg');
   const [weeklyRateKg, setWeeklyRateKg] = useState(Number(user?.weeklyWeightRateKg) || DEFAULT_WEEKLY_RATE_KG);
   const [savingUnit, setSavingUnit] = useState(false);
-  const [savingPace, setSavingPace] = useState(false);
   const [range, setRange] = useState('1M');
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -533,31 +532,6 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
     setIsModalOpen(true);
   };
 
-  const handlePaceChange = async (value) => {
-    const nextRate = Number(value);
-    if (!(nextRate > 0) || savingPace) return;
-    setWeeklyRateKg(nextRate);
-    setUserSummary((previous) => ({ ...previous, weeklyWeightRateKg: nextRate }));
-
-    if (!userId) return;
-    setSavingPace(true);
-    try {
-      const response = await fetch('/api/user/profile', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, weeklyWeightRateKg: nextRate }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || 'Unable to save weekly pace.');
-      if (data.user) onUpdateUser?.(data.user);
-    } catch (paceError) {
-      setError(paceError.message || 'Unable to save weekly pace.');
-    } finally {
-      setSavingPace(false);
-    }
-  };
-
-
 
   return (
     <div
@@ -808,27 +782,20 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
         <div className="flex items-center justify-between gap-3">
           <div>
             <h3 className="text-xs font-bold text-white">Goal timeline</h3>
-            <p className="text-[10px] text-gray-500 mt-0.5">Calculated from your latest recorded weight</p>
+            <p className="text-[10px] text-gray-500 mt-0.5">Calculated from your latest recorded weight and the pace saved in Goals</p>
           </div>
           <div className="text-right">
-            <label htmlFor="weekly-weight-pace" className="block text-[9px] text-gray-500 mb-1">Weekly pace</label>
-            <select
-              id="weekly-weight-pace"
-              value={weeklyRateKg}
-              onChange={(e) => handlePaceChange(e.target.value)}
-              disabled={savingPace}
-              className="bg-[#1C2638] border border-gray-700 rounded-lg px-2 py-1.5 text-[10px] font-bold text-indigo-300 focus:outline-none disabled:opacity-50"
+            <p className="text-[9px] text-gray-500 mb-1">Weekly pace · Goals</p>
+            <p className="text-[10px] font-bold text-indigo-300">
+              {(displayUnit === 'lbs' ? weeklyRateKg / KG_PER_LB : weeklyRateKg).toFixed(2)} {displayUnit}/week
+            </p>
+            <button
+              type="button"
+              onClick={onNavigateToGoals}
+              className="mt-1 text-[9px] font-semibold text-gray-400 underline underline-offset-2 hover:text-white"
             >
-              {WEEKLY_RATE_OPTIONS_LB.map((rateLbs) => {
-                const rateKg = rateLbs * KG_PER_LB;
-                const displayRate = displayUnit === 'lbs' ? rateLbs : rateKg;
-                return (
-                  <option key={rateLbs} value={rateKg} className="bg-[#121A2A] text-white">
-                    {displayRate.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')} {displayUnit}/week
-                  </option>
-                );
-              })}
-            </select>
+              Edit in Goals
+            </button>
           </div>
         </div>
 

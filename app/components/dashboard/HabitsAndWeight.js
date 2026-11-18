@@ -107,9 +107,19 @@ export default function HabitsAndWeight({
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 items-start">
       
       {/* LEFT COLUMN: WEIGHT PROGRESS */}
-      <div 
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label="Open Profile Weight Progress"
         onClick={onOpenWeightTab}
-        className="lg:col-span-6 bg-[#121A2A] border border-gray-800/80 rounded-2xl p-3.5 flex flex-col justify-between hover:border-gray-700 transition-all cursor-pointer group h-full relative"
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onOpenWeightTab?.();
+          }
+        }}
+        className="lg:col-span-6 bg-[#121A2A] border border-gray-800/80 rounded-2xl p-3.5 flex flex-col justify-between cursor-pointer h-full relative focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
       >
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-2">
@@ -118,7 +128,7 @@ export default function HabitsAndWeight({
             </div>
             <div>
               <h3 className="text-xs font-bold text-white">Weight Progress</h3>
-              <p className="text-[9px] text-gray-500">Tap to view history, or + to log now</p>
+              <p className="text-[9px] text-gray-500">Open Weight Progress, or + to log now</p>
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -130,14 +140,14 @@ export default function HabitsAndWeight({
             >
               <Plus className="w-4 h-4" />
             </button>
-            <ChevronRight className="w-3.5 h-3.5 text-gray-600 group-hover:text-indigo-400 transition-colors" />
+            <ChevronRight className="w-3.5 h-3.5 text-gray-600" />
           </div>
         </div>
 
         <div className="my-3">
           <div className="flex items-baseline gap-1.5">
             <span className="text-2xl font-black text-white tracking-tight">
-              {currentWeight ?? '--'}
+              {currentWeight !== null && Number.isFinite(Number(currentWeight)) ? Number(currentWeight).toFixed(1) : '--'}
             </span>
             {currentWeight !== null && (
               <span className="text-xs font-bold text-gray-400">{unit}</span>
@@ -153,7 +163,7 @@ export default function HabitsAndWeight({
         <div className="bg-[#0B121F] px-2.5 py-1.5 rounded-xl border border-gray-800/80 flex items-center justify-between text-[10px]">
           <span className="text-gray-400">Goal</span>
           <span className="font-bold text-indigo-400">
-            {goalWeight !== null ? `${goalWeight} ${unit}` : 'Not set'}
+            {goalWeight !== null ? `${Number(goalWeight).toFixed(1)} ${unit}` : 'Not set'}
           </span>
         </div>
 

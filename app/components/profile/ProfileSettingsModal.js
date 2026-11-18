@@ -31,7 +31,7 @@ const scrollbarClasses =
   "[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-700 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-gray-600";
 const scrollbarStyle = { scrollbarWidth: 'thin', scrollbarColor: '#374151 transparent' };
 
-export default function ProfileSettingsModal({ isOpen, onClose, user, onUpdateUser }) {
+export default function ProfileSettingsModal({ isOpen, onClose, user, onUpdateUser, initialTab = 'menu' }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('menu');
   const [saving, setSaving] = useState(false);
@@ -44,8 +44,9 @@ useEffect(() => {
   if (isOpen && user) {
     setFormData({ ...user });
     setWeightUnit(user.weightUnit === 'lbs' ? 'lbs' : 'kg');
+    setActiveTab(initialTab || 'menu');
   }
-}, [isOpen, user]);
+}, [isOpen, user, initialTab]);
 
 if (!isOpen) return null;
 
@@ -249,7 +250,7 @@ if (!isOpen) return null;
           )}
 
           {activeTab === 'weight' && (
-            <WeightProgressTab user={user} onUpdateUser={onUpdateUser} />
+            <WeightProgressTab user={user} onUpdateUser={onUpdateUser} onNavigateToGoals={() => setActiveTab('goals')} />
           )}
 
           {activeTab === 'nutrition' && (

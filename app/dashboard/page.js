@@ -16,6 +16,17 @@ import { useDashboardData } from '../hooks/useDashboardData';
 
 export default function Dashboard() {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [profileInitialTab, setProfileInitialTab] = useState('menu');
+
+  const openProfileMenu = () => {
+    setProfileInitialTab('menu');
+    setIsProfileModalOpen(true);
+  };
+
+  const openWeightProgress = () => {
+    setProfileInitialTab('weight');
+    setIsProfileModalOpen(true);
+  };
 
   const {
     user,
@@ -87,7 +98,7 @@ export default function Dashboard() {
         <DashboardHeader 
           user={user} 
           calorieGoal={calorieGoal}
-          onOpenProfile={() => setIsProfileModalOpen(true)}
+          onOpenProfile={openProfileMenu}
           onLogout={handleLogout}
           router={router}
         />
@@ -184,7 +195,8 @@ export default function Dashboard() {
         <HabitsAndWeight 
           user={user}
           selectedDate={selectedDate}
-          setIsProfileModalOpen={setIsProfileModalOpen}
+          onOpenWeightTab={openWeightProgress}
+          onUpdateUser={handleUpdateUserData}
           todayWater={todayWater}
           todaySteps={todaySteps}
           waterSubtitle={waterSubtitle}
@@ -196,6 +208,7 @@ export default function Dashboard() {
 
         <ProfileSettingsModal 
           isOpen={isProfileModalOpen}
+          initialTab={profileInitialTab}
           onClose={() => setIsProfileModalOpen(false)}
           user={user}
           onUpdateUser={handleUpdateUserData}

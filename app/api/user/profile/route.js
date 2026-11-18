@@ -63,6 +63,7 @@ export async function PUT(req) {
       weeklyGoal,
       activityLevel,
       weightUnit,
+      weeklyWeightRateKg,
       startingWeight,
       startingWeightDate,
       targetCalories,
@@ -144,6 +145,7 @@ export async function PUT(req) {
       ...(parseNum(effectiveWeight) !== undefined && { weight: parseNum(effectiveWeight), currentWeight: parseNum(effectiveWeight) }),
       ...(parseNum(startingWeight) !== undefined && { startingWeight: parseNum(startingWeight) }),
       ...(parseNum(goalWeight) !== undefined && { goalWeight: parseNum(goalWeight) }),
+      ...(parseNum(weeklyWeightRateKg) !== undefined && { weeklyWeightRateKg: parseNum(weeklyWeightRateKg) }),
       ...(parseNum(bodyFat) !== undefined && { bodyFat: parseNum(bodyFat) }),
       ...(parseNum(targetCalories) !== undefined && { targetCalories: parseNum(targetCalories) }),
 
@@ -187,6 +189,14 @@ export async function PUT(req) {
       ...(parseNum(workoutsPerWeek) !== undefined && { workoutsPerWeek: parseNum(workoutsPerWeek) }),
       ...(parseNum(minutesPerWorkout) !== undefined && { minutesPerWorkout: parseNum(minutesPerWorkout) }),
     };
+
+    if (weeklyWeightRateKg !== undefined && weeklyWeightRateKg !== null &&
+        (Number(weeklyWeightRateKg) < 0.05 || Number(weeklyWeightRateKg) > 2)) {
+      return NextResponse.json(
+        { error: 'Weekly weight-change pace must be between 0.05 and 2 kg per week.' },
+        { status: 400 }
+      );
+    }
 
     const updatePayload = {
       ...restFields,
