@@ -56,7 +56,7 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
   const [inputValue, setInputValue] = useState(100);
 
   // Shared scale connection (lives above this modal, so it survives open/close)
-  const { isConnected, status: bluetoothStatus, liveWeightGrams, lastPacketHex, connect, disconnect } = useBluetoothScale();
+  const { isConnected, status: bluetoothStatus, liveWeightGrams, lastPacketHex, deviceName, gattInventory, connect, disconnect } = useBluetoothScale();
 
   // Detect data source type
   const isEditing = initialData && (initialData._id || initialData.id) && !initialData.caloriesPer100g && !initialData.items && initialData.totalCalories === undefined;
@@ -455,6 +455,33 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
                 </div>
               </div>
               {scaleNotice && <p className="text-[10px] text-emerald-300">{scaleNotice}</p>}
+              <details className="border-t border-gray-800 pt-2">
+                <summary className="cursor-pointer text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                  Hardware tare discovery (read-only)
+                </summary>
+                <div className="mt-2 space-y-2 text-[9px] text-gray-400">
+                  <p>Connected device: <span className="font-semibold text-gray-300">{deviceName || 'Unknown device'}</span></p>
+                  <p className="text-gray-500">Inspected service: 0xFFF0. No Bluetooth write command has been sent.</p>
+                  {gattInventory.length > 0 ? gattInventory.map((service) => (
+                    <div key={service.serviceUuid} className="space-y-1">
+                      <p className="font-mono text-gray-300">Service UUID: {service.serviceUuid}</p>
+                      {service.characteristics.map((characteristic) => (
+                        <div key={characteristic.uuid} className="rounded-lg bg-[#161F30] p-2">
+                          <p className="font-mono text-gray-300">{characteristic.uuid}</p>
+                          <p className="mt-1 break-words">
+                            {characteristic.properties.length > 0
+                              ? characteristic.properties.join(' · ')
+                              : 'No readable or writable properties reported'}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )) : (
+                    <p>Characteristic information is unavailable. Reconnect the scale and check the browser console if this remains empty.</p>
+                  )}
+                  <p className="text-amber-300/80">A writable characteristic does not by itself identify the tare command. We must verify the correct command before sending anything.</p>
+                </div>
+              </details>
               {lastPacketHex && (
                 <details className="border-t border-gray-800 pt-2">
                   <summary className="cursor-pointer text-[9px] font-semibold uppercase tracking-wider text-gray-500">
