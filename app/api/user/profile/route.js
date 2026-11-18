@@ -141,7 +141,7 @@ export async function PUT(req) {
     };
 
     const numericFields = {
-      ...(parseNum(effectiveWeight) !== undefined && { weight: parseNum(effectiveWeight) }),
+      ...(parseNum(effectiveWeight) !== undefined && { weight: parseNum(effectiveWeight), currentWeight: parseNum(effectiveWeight) }),
       ...(parseNum(startingWeight) !== undefined && { startingWeight: parseNum(startingWeight) }),
       ...(parseNum(goalWeight) !== undefined && { goalWeight: parseNum(goalWeight) }),
       ...(parseNum(bodyFat) !== undefined && { bodyFat: parseNum(bodyFat) }),

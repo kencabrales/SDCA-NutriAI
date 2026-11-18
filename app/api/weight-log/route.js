@@ -42,16 +42,20 @@ export async function GET(req) {
     }
 
     const logs = await WeightLog.find(query).sort({ date: -1 }).lean();
-    const user = await User.findById(userId).select('startingWeight weight currentWeight weightUnit goalWeight').lean();
+    const user = await User.findById(userId).select('startingWeight startingWeightDate weight currentWeight weightUnit goalWeight lastWeighInDate weeklyWeightRateKg nutritionalStrategy weeklyPace weeklyGoal').lean();
 
     return NextResponse.json({
       logs,
       userSummary: {
-        startingWeight: user?.startingWeight || (logs.length ? logs[logs.length - 1].weight : 0),
-        currentWeight: user?.currentWeight || user?.weight || (logs.length ? logs[0].weight : 0),
-        goalWeight: user?.goalWeight || 0,
+        startingWeight: user?.startingWeight ?? null,
+        startingWeightDate: user?.startingWeightDate ?? null,
+        currentWeight: user?.currentWeight ?? user?.weight ?? null,
+        lastWeighInDate: user?.lastWeighInDate ?? null,
+        goalWeight: user?.goalWeight ?? null,
         unit: user?.weightUnit || 'kg',
-      },
+        weeklyWeightRateKg: user?.weeklyWeightRateKg || 0.45359237,
+        nutritionalStrategy: user?.nutritionalStrategy || user?.weeklyPace || user?.weeklyGoal || '',
+      },,
     }, { status: 200 });
 
   } catch (error) {
@@ -70,7 +74,7 @@ export async function POST(req) {
       return NextResponse.json({ error: 'userId and a valid weight are required' }, { status: 400 });
     }
 
-    const logDate = date ? new Date(date) : new Date();
+    if (!['kg', 'lbs'].includes(unit)) {\n      return NextResponse.json({ error: 'Weight unit must be kg or lbs.' }, { status: 400 });\n    }\n\n    const logDate = date ? new Date(date) : new Date();
     if (isNaN(logDate.getTime())) {
       return NextResponse.json({ error: 'Invalid date' }, { status: 400 });
     }
@@ -155,16 +159,26 @@ export async function DELETE(req) {
     // entry, so Goals/MyProfile/ProfileHeader don't keep showing a deleted value.
     const userId = deletedLog.userId;
     const newLatestLog = await WeightLog.findOne({ userId }).sort({ date: -1 }).lean();
+    const existingUser = await User.findById(userId).select('weightUnit').lean();
+    const preferredUnit = existingUser?.weightUnit || 'kg';
 
     let updatedUser = null;
     if (newLatestLog) {
+      const storedUnit = newLatestLog.unit || 'kg';
+      const weightInPreferredUnit = storedUnit === preferredUnit
+        ? Number(newLatestLog.weight)
+        : preferredUnit === 'lbs'
+          ? Number(newLatestLog.weight) / 0.45359237
+          : Number(newLatestLog.weight) * 0.45359237;
+      const normalizedWeight = Number(weightInPreferredUnit.toFixed(2));
+
       updatedUser = await User.findByIdAndUpdate(
         userId,
         {
           $set: {
-            weight: newLatestLog.weight,
-            currentWeight: newLatestLog.weight,
-            weightUnit: newLatestLog.unit || 'kg',
+            weight: normalizedWeight,
+            currentWeight: normalizedWeight,
+            weightUnit: preferredUnit,
             lastWeighInDate: new Date(newLatestLog.date).toISOString().split('T')[0],
           },
         },
