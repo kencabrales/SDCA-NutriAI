@@ -413,7 +413,8 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
   }, [logs, forecast, sourceUnit, displayUnit, sortedLogsNewestFirst, latestLog, previousLog]);
 
   const latestChartPoint = chartData.find((point) => point.isLatest && Number.isFinite(point.weight));
-  const previousChartPoint = chartData.find((point) => point.isPrevious && Number.isFinite(point.weight));
+  const latestLogDateKey = latestLog ? toDateKey(new Date(latestLog.date)) : null;
+  const previousChartPoint = chartData.find((point) => point.isPrevious && point.dateKey !== latestLogDateKey && Number.isFinite(point.weight));
 
   const yDomain = useMemo(() => {
     const values = chartData.flatMap((point) => [
