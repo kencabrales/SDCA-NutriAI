@@ -10,6 +10,7 @@ import {
   YAxis,
   Tooltip,
   ReferenceLine,
+  ReferenceDot,
 } from 'recharts';
 import {
   Scale,
@@ -79,11 +80,35 @@ function formatWeightDate(date, options = { month: 'short', day: 'numeric', year
   return date.toLocaleDateString('en-US', options);
 }
 
+function formatWeekDayDuration(totalDays) {
+  if (totalDays <= 0) return '0 days';
+  const weeks = Math.floor(totalDays / 7);
+  const days = totalDays % 7;
+  const parts = [];
+  if (weeks) parts.push(`${weeks} ${weeks === 1 ? 'week' : 'weeks'}`);
+  if (days) parts.push(`${days} ${days === 1 ? 'day' : 'days'}`);
+  return parts.join(', ') || 'Less than a day';
+}
+
+function formatCalendarDuration(startDate, endDate) {
+  let months = 0;
+  while (months < 120 && addMonthsClamped(startDate, months + 1) <= endDate) {
+    months += 1;
+  }
+  const monthAnchor = addMonthsClamped(startDate, months);
+  const remainingDays = Math.max(0, Math.round((endDate - monthAnchor) / 86400000));
+  const parts = [];
+  if (months) parts.push(`${months} ${months === 1 ? 'month' : 'months'}`);
+  if (remainingDays) parts.push(`${remainingDays} ${remainingDays === 1 ? 'day' : 'days'}`);
+  return parts.join(', ') || 'Less than a month';
+}
+
 export default function WeightProgressTab({ user, onUpdateUser }) {
   const isPreviewMode = !(user?._id || user?.id);
   const userId = user?._id || user?.id;
 
   const [logs, setLogs] = useState([]);
+  const [recentLogs, setRecentLogs] = useState([]);
   const [userSummary, setUserSummary] = useState({
     startingWeight: isPreviewMode ? 75.5 : (user?.startingWeight ?? null),
     startingWeightDate: user?.startingWeightDate || null,
@@ -123,6 +148,7 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
   const fetchLogs = async () => {
     if (!userId) {
       setLogs(DUMMY_LOGS);
+      setRecentLogs(DUMMY_LOGS.slice(0, 2));
       setLoading(false);
       return;
     }
@@ -134,6 +160,7 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
 
       const summary = data.userSummary || {};
       setLogs(Array.isArray(data.logs) ? data.logs : []);
+      setRecentLogs(Array.isArray(data.recentLogs) ? data.recentLogs : (Array.isArray(data.logs) ? data.logs.slice(0, 2) : []));
       setUserSummary({
         startingWeight: summary.startingWeight ?? user?.startingWeight ?? null,
         startingWeightDate: summary.startingWeightDate || user?.startingWeightDate || null,
@@ -150,6 +177,7 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
       console.error('Error fetching weight logs:', err);
       setError(err.message || 'Unable to load weight history.');
       setLogs([]);
+      setRecentLogs([]);
     } finally {
       setLoading(false);
     }
@@ -244,20 +272,38 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
 
   // Convert every stored measurement into the selected display unit before
   // calculating metrics or drawing the chart. Historical log units stay intact.
-  const sortedLogsNewestFirst = useMemo(
-    () => [...logs].sort((a, b) => new Date(b.date) - new Date(a.date)),
-    [logs]
+  const sortByMostRecent = (items) => [...items].sort((a, b) => {
+    const dateDifference = new Date(b.date) - new Date(a.date);
+    if (dateDifference !== 0) return dateDifference;
+    return new Date(b.createdAt || b.updatedAt || b.date) - new Date(a.createdAt || a.updatedAt || a.date);
+  });
+  const sortedLogsNewestFirst = useMemo(() => sortByMostRecent(logs), [logs]);
+  const sortedRecentLogsNewestFirst = useMemo(
+    () => sortByMostRecent(recentLogs.length ? recentLogs : logs).slice(0, 2),
+    [recentLogs, logs]
   );
-  const latestLog = sortedLogsNewestFirst[0] || null;
+  const latestLog = sortedRecentLogsNewestFirst[0] || null;
+  const previousLog = sortedRecentLogsNewestFirst[1] || null;
   const earliestLog = sortedLogsNewestFirst[sortedLogsNewestFirst.length - 1] || null;
   const sourceUnit = userSummary.unit || 'kg';
+  const latestLogWeight = latestLog
+    ? convertWeight(latestLog.weight, latestLog.unit || sourceUnit, displayUnit)
+    : null;
+  const previousLogWeight = previousLog
+    ? convertWeight(previousLog.weight, previousLog.unit || sourceUnit, displayUnit)
+    : null;
+  const changeSincePrevious = latestLogWeight !== null && previousLogWeight !== null
+    ? Number((latestLogWeight - previousLogWeight).toFixed(1))
+    : null;
 
   const startWeight = userSummary.startingWeight !== null && userSummary.startingWeight !== undefined
     ? convertWeight(userSummary.startingWeight, sourceUnit, displayUnit)
     : (earliestLog ? convertWeight(earliestLog.weight, earliestLog.unit || sourceUnit, displayUnit) : null);
-  const currentWeight = userSummary.currentWeight !== null && userSummary.currentWeight !== undefined
-    ? convertWeight(userSummary.currentWeight, sourceUnit, displayUnit)
-    : (latestLog ? convertWeight(latestLog.weight, latestLog.unit || sourceUnit, displayUnit) : startWeight);
+  const currentWeight = latestLogWeight !== null
+    ? latestLogWeight
+    : (userSummary.currentWeight !== null && userSummary.currentWeight !== undefined
+      ? convertWeight(userSummary.currentWeight, sourceUnit, displayUnit)
+      : startWeight);
   const goalWeight = userSummary.goalWeight !== null && userSummary.goalWeight !== undefined
     ? convertWeight(userSummary.goalWeight, sourceUnit, displayUnit)
     : null;
@@ -285,8 +331,8 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
     }
 
     const direction = goalWeight < currentWeight ? 'lose' : 'gain';
-    const baselineDate = parseLocalDate(userSummary.lastWeighInDate) ||
-      (latestLog ? new Date(latestLog.date) : null) ||
+    const baselineDate = (latestLog ? parseLocalDate(latestLog.date) : null) ||
+      parseLocalDate(userSummary.lastWeighInDate) ||
       parseLocalDate(userSummary.startingWeightDate) ||
       new Date();
     const weeks = deltaKg / weeklyRateKg;
@@ -336,15 +382,21 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
 
   const chartData = useMemo(() => {
     const byDate = new Map();
-    for (const log of logs) {
+    for (const log of [...sortedLogsNewestFirst].reverse()) {
       const date = new Date(log.date);
       const dateKey = toDateKey(date);
+      const existing = byDate.get(dateKey);
+      const isLatest = String(log._id) === String(latestLog?._id);
+      const isPrevious = String(log._id) === String(previousLog?._id);
       byDate.set(dateKey, {
+        ...existing,
         ...log,
         date,
         dateKey,
         dateStr: formatWeightDate(date, { month: 'short', day: 'numeric' }),
         weight: Number(convertWeight(log.weight, log.unit || sourceUnit, displayUnit)?.toFixed(1)),
+        isLatest: Boolean(existing?.isLatest || isLatest),
+        isPrevious: Boolean(existing?.isPrevious || isPrevious),
       });
     }
     for (const point of forecast?.points || []) {
@@ -358,7 +410,10 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
     }
 
     return [...byDate.values()].sort((a, b) => a.date - b.date);
-  }, [logs, forecast, sourceUnit, displayUnit]);
+  }, [logs, forecast, sourceUnit, displayUnit, sortedLogsNewestFirst, latestLog, previousLog]);
+
+  const latestChartPoint = chartData.find((point) => point.isLatest && Number.isFinite(point.weight));
+  const previousChartPoint = chartData.find((point) => point.isPrevious && Number.isFinite(point.weight));
 
   const yDomain = useMemo(() => {
     const values = chartData.flatMap((point) => [
@@ -532,6 +587,46 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
         </div>
       </div>
 
+      {/* MOST RECENT WEIGH-INS */}
+      <div className="mx-4 grid grid-cols-2 gap-2">
+        <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-3 min-w-0">
+          <div className="flex items-center justify-between gap-1">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-emerald-300">Latest</p>
+            <span className="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[8px] font-bold text-emerald-300">MOST RECENT</span>
+          </div>
+          {latestLog ? (
+            <>
+              <p className="mt-1 text-lg font-bold font-mono text-white">{latestLogWeight?.toFixed(1)} <span className="text-[10px] text-gray-400">{displayUnit}</span></p>
+              <p className="text-[9px] text-gray-400">{formatWeightDate(new Date(latestLog.date))}</p>
+            </>
+          ) : (
+            <p className="mt-2 text-[10px] text-gray-500">No weigh-in yet</p>
+          )}
+        </div>
+        <div className="rounded-xl border border-blue-500/25 bg-blue-500/5 p-3 min-w-0">
+          <p className="text-[9px] font-bold uppercase tracking-wider text-blue-300">Previous</p>
+          {previousLog ? (
+            <>
+              <p className="mt-1 text-lg font-bold font-mono text-white">{previousLogWeight?.toFixed(1)} <span className="text-[10px] text-gray-400">{displayUnit}</span></p>
+              <p className="text-[9px] text-gray-400">{formatWeightDate(new Date(previousLog.date))}</p>
+            </>
+          ) : (
+            <p className="mt-2 text-[10px] text-gray-500">Log another weigh-in to compare</p>
+          )}
+        </div>
+        {changeSincePrevious !== null && (
+          <div className="col-span-2 flex items-center justify-between rounded-lg bg-[#0D1524] px-3 py-2">
+            <span className="text-[10px] text-gray-400">Change since previous weigh-in</span>
+            <span className={`text-xs font-bold font-mono ${changeSincePrevious < 0 ? 'text-emerald-300' : changeSincePrevious > 0 ? 'text-amber-300' : 'text-gray-300'}`}>
+              {changeSincePrevious > 0 ? '+' : ''}{changeSincePrevious.toFixed(1)} {displayUnit}
+              <span className="ml-1 text-[9px] font-normal text-gray-500">
+                {changeSincePrevious < 0 ? 'down' : changeSincePrevious > 0 ? 'up' : 'no change'}
+              </span>
+            </span>
+          </div>
+        )}
+      </div>
+
       {/* WEIGHT HISTORY + PROJECTED GOAL LINE */}
       <div className="px-4 pt-2">
         <div className="h-52 w-full relative">
@@ -566,6 +661,28 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
                     return null;
                   }}
                 />
+                {previousChartPoint && (
+                  <ReferenceDot
+                    x={previousChartPoint.dateStr}
+                    y={previousChartPoint.weight}
+                    r={5}
+                    fill="#60a5fa"
+                    stroke="#0f172a"
+                    strokeWidth={2}
+                    label={{ value: 'PREVIOUS', fill: '#93c5fd', fontSize: 8, position: 'bottom' }}
+                  />
+                )}
+                {latestChartPoint && (
+                  <ReferenceDot
+                    x={latestChartPoint.dateStr}
+                    y={latestChartPoint.weight}
+                    r={6}
+                    fill="#34d399"
+                    stroke="#0f172a"
+                    strokeWidth={2}
+                    label={{ value: 'LATEST', fill: '#6ee7b7', fontSize: 8, position: 'top' }}
+                  />
+                )}
                 {goalWeight > 0 && (
                   <ReferenceLine
                     y={goalWeight}
@@ -654,8 +771,10 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
               </div>
               <div className="rounded-xl bg-[#121A2A] border border-gray-800 p-3">
                 <p className="text-[9px] text-gray-500 uppercase tracking-wide">Estimated time</p>
-                <p className="text-sm font-bold text-white mt-1">{forecast.weeks.toFixed(1)} weeks</p>
-                <p className="text-[9px] text-gray-500 mt-0.5">About {(forecast.days / 30.4375).toFixed(1)} months</p>
+                <p className="text-sm font-bold text-white mt-1">{formatWeekDayDuration(forecast.days)}</p>
+                <p className="text-[9px] text-gray-500 mt-0.5">
+                  {formatCalendarDuration(forecast.startDate, forecast.expectedDate)} · {forecast.days} days total
+                </p>
               </div>
             </div>
             <p className="text-[10px] text-gray-400">
@@ -713,13 +832,21 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
           return (
             <div key={log._id} className="px-5 py-3.5 flex items-center justify-between hover:bg-[#161F30] transition-colors">
               <div>
-                <div className="text-xs font-semibold text-gray-200">
-                  {new Date(log.date).toLocaleDateString('en-US', {
-                    weekday: 'long',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                  })}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="text-xs font-semibold text-gray-200">
+                    {new Date(log.date).toLocaleDateString('en-US', {
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric',
+                    })}
+                  </div>
+                  {String(log._id) === String(latestLog?._id) && (
+                    <span className="rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[8px] font-bold text-emerald-300">LATEST</span>
+                  )}
+                  {String(log._id) === String(previousLog?._id) && (
+                    <span className="rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[8px] font-bold text-blue-300">PREVIOUS</span>
+                  )}
                 </div>
               </div>
               <div className="flex items-center space-x-3">

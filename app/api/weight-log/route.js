@@ -41,11 +41,13 @@ export async function GET(req) {
       query.date = dateFilter;
     }
 
-    const logs = await WeightLog.find(query).sort({ date: -1 }).lean();
+    const logs = await WeightLog.find(query).sort({ date: -1, createdAt: -1 }).lean();
+    const recentLogs = await WeightLog.find({ userId }).sort({ date: -1, createdAt: -1 }).limit(2).lean();
     const user = await User.findById(userId).select('startingWeight startingWeightDate weight currentWeight weightUnit goalWeight lastWeighInDate weeklyWeightRateKg nutritionalStrategy weeklyPace weeklyGoal').lean();
 
     return NextResponse.json({
       logs,
+      recentLogs,
       userSummary: {
         startingWeight: user?.startingWeight ?? null,
         startingWeightDate: user?.startingWeightDate ?? null,
