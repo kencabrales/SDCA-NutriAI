@@ -9,6 +9,8 @@ export function BluetoothScaleProvider({ children }) {
   const [status, setStatus] = useState('Tap to Connect Scale');
   const [liveWeightGrams, setLiveWeightGrams] = useState(null);
   const [lastPacketHex, setLastPacketHex] = useState('');
+  const [deviceName, setDeviceName] = useState('');
+  const [gattInventory, setGattInventory] = useState([]);
 
   const serverRef = useRef(null);
   const charRef = useRef(null);
@@ -40,6 +42,8 @@ export function BluetoothScaleProvider({ children }) {
     setIsConnected(false);
     setLiveWeightGrams(null);
     setLastPacketHex('');
+    setDeviceName('');
+    setGattInventory([]);
     setStatus('Tap to Connect Scale');
   }, [handleWeightPacket]);
 
@@ -53,16 +57,20 @@ export function BluetoothScaleProvider({ children }) {
 
     try {
       setLastPacketHex('');
+      setGattInventory([]);
+      setDeviceName('');
       setStatus('Scanning...');
       const device = await navigator.bluetooth.requestDevice({
         filters: [{ services: [0xFFF0] }],
         optionalServices: [0xFFF0],
       });
 
+      setDeviceName(device.name || 'Unnamed Bluetooth device');
       device.addEventListener('gattserverdisconnected', () => {
         setIsConnected(false);
         setLiveWeightGrams(null);
         setLastPacketHex('');
+        setGattInventory([]);
         setStatus('Disconnected. Tap to Reconnect');
       });
 
@@ -71,6 +79,34 @@ export function BluetoothScaleProvider({ children }) {
       serverRef.current = server;
 
       const service = await server.getPrimaryService(0xFFF0);
+
+      // Read-only capability discovery: inspect characteristics exposed by the
+      // already-authorized service. Never send an unverified tare payload.
+      try {
+        const availableCharacteristics = await service.getCharacteristics();
+        setGattInventory([{
+          serviceUuid: service.uuid,
+          characteristics: availableCharacteristics.map((item) => ({
+            uuid: item.uuid,
+            properties: Object.entries({
+              read: item.properties.read,
+              write: item.properties.write,
+              writeWithoutResponse: item.properties.writeWithoutResponse,
+              notify: item.properties.notify,
+              indicate: item.properties.indicate,
+              authenticatedSignedWrites: item.properties.authenticatedSignedWrites,
+              reliableWrite: item.properties.reliableWrite,
+              writableAuxiliaries: item.properties.writableAuxiliaries,
+            })
+              .filter(([, supported]) => Boolean(supported))
+              .map(([property]) => property),
+          })),
+        }]);
+      } catch (inventoryError) {
+        console.warn('BLE characteristic capability inspection failed:', inventoryError);
+        setGattInventory([]);
+      }
+
       const characteristic = await service.getCharacteristic(0xFFF1);
       charRef.current = characteristic;
 
@@ -96,7 +132,7 @@ export function BluetoothScaleProvider({ children }) {
   }, []);
 
   return (
-    <BluetoothScaleContext.Provider value={{ isConnected, status, liveWeightGrams, lastPacketHex, connect, disconnect }}>
+    <BluetoothScaleContext.Provider value={{ isConnected, status, liveWeightGrams, lastPacketHex, deviceName, gattInventory, connect, disconnect }}>
       {children}
     </BluetoothScaleContext.Provider>
   );
