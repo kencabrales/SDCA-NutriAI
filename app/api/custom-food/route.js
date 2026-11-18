@@ -53,7 +53,12 @@ export async function POST(req) {
       );
     }
 
-    if (body.clientMutationId) {\n      const existing = await CustomFood.findOne({ createdBy: body.userId, clientMutationId: body.clientMutationId }).lean();\n      if (existing) return NextResponse.json({ success: true, food: existing, alreadySynced: true }, { status: 200 });\n    }\n\n    const newCustomFood = await CustomFood.create({
+    if (body.clientMutationId) {
+      const existing = await CustomFood.findOne({ createdBy: body.userId, clientMutationId: body.clientMutationId }).lean();
+      if (existing) return NextResponse.json({ success: true, food: existing, alreadySynced: true }, { status: 200 });
+    }
+
+    const newCustomFood = await CustomFood.create({
       foodName: body.foodName,
       brandName: body.brandName || body.brand || null,
       servingSize: body.servingSize,
