@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { X, Cpu, Activity, ChevronDown, ChevronUp, Wifi, WifiOff } from 'lucide-react';
+import { X, Cpu, Activity, ChevronDown, ChevronUp, Wifi, WifiOff, Scale, RotateCcw } from 'lucide-react';
 import { useBluetoothScale } from '../BluetoothScaleContext';
 
 export default function FoodDetailModal({ isOpen, foodName, mealType, initialData, onClose, onConfirmLog, onUpdateLog }) {
@@ -45,6 +45,10 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
   const [servings, setServings] = useState(1);
   const [unit, setUnit] = useState('g');
   const [showNutritionFacts, setShowNutritionFacts] = useState(false);
+  const [scaleTareOffsetGrams, setScaleTareOffsetGrams] = useState(0);
+  const [hasScaleTare, setHasScaleTare] = useState(false);
+  const [scaleNotice, setScaleNotice] = useState('');
+  const [saveError, setSaveError] = useState('');
 
   // Absolute source of truth to prevent conversion drift
   const [weightInGrams, setWeightInGrams] = useState(100);
@@ -52,7 +56,7 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
   const [inputValue, setInputValue] = useState(100);
 
   // Shared scale connection (lives above this modal, so it survives open/close)
-  const { isConnected, status: bluetoothStatus, liveWeightGrams, connect, disconnect } = useBluetoothScale();
+  const { isConnected, status: bluetoothStatus, liveWeightGrams, lastPacketHex, connect, disconnect } = useBluetoothScale();
 
   // Detect data source type
   const isEditing = initialData && (initialData._id || initialData.id) && !initialData.caloriesPer100g && !initialData.items && initialData.totalCalories === undefined;
@@ -75,6 +79,10 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
   useEffect(() => {
     if (isOpen) {
       setShowNutritionFacts(false);
+      setScaleTareOffsetGrams(0);
+      setHasScaleTare(false);
+      setScaleNotice('');
+      setSaveError('');
       if (isMeal) {
         setServings(1);
         setWeightInGrams(100);
@@ -121,15 +129,44 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
     if (liveWeightGrams === lastLiveRef.current) return;
     lastLiveRef.current = liveWeightGrams;
 
-    const cleaned = liveWeightGrams < NOISE_FLOOR_GRAMS ? 0 : liveWeightGrams;
+    // Only values close to zero are treated as noise. A negative reading
+    // must stay negative once the scale's sign encoding is decoded.
+    const netReading = liveWeightGrams - scaleTareOffsetGrams;
+    const cleaned = Math.abs(netReading) < NOISE_FLOOR_GRAMS ? 0 : netReading;
     setWeightInGrams(cleaned);
     updateInputValue(cleaned, unit);
-  }, [liveWeightGrams, isConnected, isOpen, isMeal, isEditing, unit]);
+  }, [liveWeightGrams, isConnected, isOpen, isMeal, isEditing, unit, scaleTareOffsetGrams]);
+
+  // This is a NutriAI-only tare offset for this food entry. It does not
+  // send a tare command to the physical scale.
+  const handleScaleTare = () => {
+    if (!isConnected || !Number.isFinite(liveWeightGrams)) return;
+
+    setScaleTareOffsetGrams(liveWeightGrams);
+    setHasScaleTare(true);
+    setWeightInGrams(0);
+    updateInputValue(0, unit);
+    setScaleNotice('Current reading set to zero for this food entry.');
+    setSaveError('');
+  };
+
+  const handleResetScaleTare = () => {
+    setScaleTareOffsetGrams(0);
+    setHasScaleTare(false);
+    setScaleNotice('App tare cleared.');
+
+    if (Number.isFinite(liveWeightGrams)) {
+      const rawReading = Math.abs(liveWeightGrams) < NOISE_FLOOR_GRAMS ? 0 : liveWeightGrams;
+      setWeightInGrams(rawReading);
+      updateInputValue(rawReading, unit);
+    }
+  };
 
   // Handle manual input changes
   const handleInputChange = (e) => {
     const rawValue = e.target.value;
     setInputValue(rawValue);
+    setSaveError('');
 
     const numVal = parseFloat(rawValue) || 0;
     const factor = GRAMS_PER_UNIT[unit] ?? 1;
@@ -155,7 +192,7 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
     let vitaminA = 0, vitaminC = 0, calcium = 0, iron = 0, vitaminB12 = 0, vitaminD = 0;
 
     const currentServings = Number(servings) || 1;
-    const dynamicGrams = weightInGrams * currentServings;
+    const dynamicGrams = Math.max(0, weightInGrams) * currentServings;
     const round1 = (n) => parseFloat((n || 0).toFixed(1));
 
     if (isMeal) {
@@ -285,8 +322,14 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
   if (!isOpen) return null;
 
   const handleSave = () => {
-    const finalAmount = isMeal ? servings : Number((parseFloat(inputValue) * (Number(servings) || 1)).toFixed(2));
-    
+    const finalAmount = isMeal ? Number(servings) : Number((parseFloat(inputValue) * (Number(servings) || 1)).toFixed(2));
+
+    if (!Number.isFinite(finalAmount) || finalAmount <= 0) {
+      setSaveError('Measured amount must be greater than zero. Check the scale reading or enter a valid amount before logging.');
+      return;
+    }
+
+    setSaveError('');
     const payload = {
       foodName: isMeal ? (initialData?.name || foodName) : (initialData?.foodName || foodName),
       amount: finalAmount,
@@ -372,6 +415,57 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
             )}
           </button>
 
+          {!isMeal && !isEditing && isConnected && (
+            <div className="rounded-xl border border-gray-800 bg-[#0B121F]/70 p-3 space-y-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Live scale reading</p>
+                  <p className={`mt-1 font-mono text-lg font-black tabular-nums ${(liveWeightGrams - scaleTareOffsetGrams) < 0 ? 'text-amber-300' : 'text-emerald-400'}`}>
+                    {Number.isFinite(liveWeightGrams)
+                      ? Number((liveWeightGrams - scaleTareOffsetGrams).toFixed(1)).toString()
+                      : '--'} g
+                  </p>
+                  {hasScaleTare && (
+                    <p className="text-[9px] text-gray-500">
+                      App tare offset: {Number(scaleTareOffsetGrams.toFixed(1))} g
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleScaleTare}
+                    disabled={!Number.isFinite(liveWeightGrams)}
+                    title="Set the current reading to zero in NutriAI for this food entry"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#00A86B] px-3 py-2 text-[10px] font-bold text-white hover:bg-[#00945D] disabled:opacity-40"
+                  >
+                    <Scale className="h-3.5 w-3.5" />
+                    Tare in App
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResetScaleTare}
+                    disabled={!hasScaleTare}
+                    title="Clear the NutriAI tare offset"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-gray-700 bg-[#161F30] px-3 py-2 text-[10px] font-bold text-gray-300 hover:bg-[#1C2638] disabled:opacity-40"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    Reset
+                  </button>
+                </div>
+              </div>
+              {scaleNotice && <p className="text-[10px] text-emerald-300">{scaleNotice}</p>}
+              {lastPacketHex && (
+                <details className="border-t border-gray-800 pt-2">
+                  <summary className="cursor-pointer text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                    Bluetooth packet diagnostic
+                  </summary>
+                  <p className="mt-1 break-all font-mono text-[9px] leading-relaxed text-gray-500">{lastPacketHex}</p>
+                </details>
+              )}
+            </div>
+          )}
+
           {/* Input Controls */}
           <div className="space-y-3">
             {!isMeal ? (
@@ -400,6 +494,11 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
                     className="w-24 text-right bg-[#1C2638] border border-gray-800 rounded-lg px-2 py-1 text-xs text-white font-mono focus:outline-none focus:border-[#00A86B] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                 </div>
+                {Number(inputValue) < 0 && (
+                  <p className="rounded-lg border border-amber-700/40 bg-amber-950/20 px-3 py-2 text-[10px] leading-relaxed text-amber-200">
+                    The scale is reporting a negative weight. Check the scale's tare state before logging this food.
+                  </p>
+                )}
               </>
             ) : initialData?.items?.length > 0 ? (
               <div className="bg-[#161F30] border border-gray-800 rounded-xl p-3 text-xs text-gray-400">
@@ -482,7 +581,13 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
         </div>
 
         {/* Confirmation Button */}
-        <div className="p-3 bg-[#161F30]/40 border-t border-gray-800/60 flex space-x-2 flex-shrink-0">
+        <div className="p-3 bg-[#161F30]/40 border-t border-gray-800/60 flex flex-col gap-2 flex-shrink-0">
+          {saveError && (
+            <p className="rounded-lg border border-amber-700/40 bg-amber-950/20 px-3 py-2 text-[10px] leading-relaxed text-amber-200" role="alert">
+              {saveError}
+            </p>
+          )}
+          <div className="flex space-x-2">
           <button 
             onClick={handleSave}
             className="flex-1 bg-[#00A86B] hover:bg-[#00945D] text-white text-xs uppercase tracking-wider font-bold py-3 rounded-xl transition-all shadow-md shadow-[#00A86B]/10 flex items-center justify-center space-x-1.5"
@@ -490,6 +595,7 @@ export default function FoodDetailModal({ isOpen, foodName, mealType, initialDat
             <Activity className="w-3.5 h-3.5" />
             <span>{isEditing ? 'Update Log Entry' : 'Confirm Log Entry'}</span>
           </button>
+          </div>
         </div>
 
       </div>

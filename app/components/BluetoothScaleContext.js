@@ -8,15 +8,26 @@ export function BluetoothScaleProvider({ children }) {
   const [isConnected, setIsConnected] = useState(false);
   const [status, setStatus] = useState('Tap to Connect Scale');
   const [liveWeightGrams, setLiveWeightGrams] = useState(null);
+  const [lastPacketHex, setLastPacketHex] = useState('');
 
   const serverRef = useRef(null);
   const charRef = useRef(null);
 
   const handleWeightPacket = useCallback((event) => {
     const data = event.target.value;
-    if (data.byteLength >= 10) {
-      setLiveWeightGrams(data.getUint16(8, false));
-    }
+    if (!data || data.byteLength < 10) return;
+
+    // Capture the full manufacturer-specific frame for sign-byte inspection.
+    // The scale uses a custom 0xFFF0/0xFFF1 protocol, so do not guess that
+    // bytes 8-9 are two's-complement until the negative frame is verified.
+    const packetHex = Array.from(
+      { length: data.byteLength },
+      (_, index) => data.getUint8(index).toString(16).padStart(2, '0')
+    ).join(' ').toUpperCase();
+    setLastPacketHex(packetHex);
+
+    // Keep the already-working magnitude extraction unchanged for now.
+    setLiveWeightGrams(data.getUint16(8, false));
   }, []);
 
   const disconnect = useCallback(() => {
@@ -28,6 +39,7 @@ export function BluetoothScaleProvider({ children }) {
     }
     setIsConnected(false);
     setLiveWeightGrams(null);
+    setLastPacketHex('');
     setStatus('Tap to Connect Scale');
   }, [handleWeightPacket]);
 
@@ -40,6 +52,7 @@ export function BluetoothScaleProvider({ children }) {
     }
 
     try {
+      setLastPacketHex('');
       setStatus('Scanning...');
       const device = await navigator.bluetooth.requestDevice({
         filters: [{ services: [0xFFF0] }],
@@ -49,6 +62,7 @@ export function BluetoothScaleProvider({ children }) {
       device.addEventListener('gattserverdisconnected', () => {
         setIsConnected(false);
         setLiveWeightGrams(null);
+        setLastPacketHex('');
         setStatus('Disconnected. Tap to Reconnect');
       });
 
@@ -82,7 +96,7 @@ export function BluetoothScaleProvider({ children }) {
   }, []);
 
   return (
-    <BluetoothScaleContext.Provider value={{ isConnected, status, liveWeightGrams, connect, disconnect }}>
+    <BluetoothScaleContext.Provider value={{ isConnected, status, liveWeightGrams, lastPacketHex, connect, disconnect }}>
       {children}
     </BluetoothScaleContext.Provider>
   );
