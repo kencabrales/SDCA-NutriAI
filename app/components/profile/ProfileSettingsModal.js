@@ -38,11 +38,12 @@ export default function ProfileSettingsModal({ isOpen, onClose, user, onUpdateUs
 
 const [formData, setFormData] = useState({ ...user });
 const [heightUnit, setHeightUnit] = useState('cm');
-const [weightUnit, setWeightUnit] = useState('kg');
+const [weightUnit, setWeightUnit] = useState(user?.weightUnit === 'lbs' ? 'lbs' : 'kg');
 
 useEffect(() => {
   if (isOpen && user) {
     setFormData({ ...user });
+    setWeightUnit(user.weightUnit === 'lbs' ? 'lbs' : 'kg');
   }
 }, [isOpen, user]);
 
@@ -238,6 +239,7 @@ if (!isOpen) return null;
                     ...prev,
                     ...updatedUser,
                   }));
+                  if (updatedUser?.weightUnit) setWeightUnit(updatedUser.weightUnit);
                   if (typeof onUpdateUser === 'function') {
                     onUpdateUser(updatedUser);
                   }
