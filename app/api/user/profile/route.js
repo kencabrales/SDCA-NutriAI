@@ -52,6 +52,7 @@ export async function PUT(req) {
       dateOfBirth,
       location,
       country,
+      profilePhoto,
       timezone,
       currentWeight,
       weight,
@@ -110,7 +111,27 @@ export async function PUT(req) {
     }
 
     const effectiveWeight = currentWeight ?? weight;
-    const effectiveStrategy = nutritionalStrategy ?? weeklyPace ?? weeklyGoal ?? 'cut';
+    const effectiveStrategy = nutritionalStrategy ?? weeklyPace ?? weeklyGoal;
+
+    let normalizedProfilePhoto;
+    if (profilePhoto !== undefined) {
+      if (profilePhoto === null || profilePhoto === '') {
+        normalizedProfilePhoto = '';
+      } else {
+        const validImageDataUrl =
+          typeof profilePhoto === 'string' &&
+          profilePhoto.length <= 700000 &&
+          /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(profilePhoto);
+
+        if (!validImageDataUrl) {
+          return NextResponse.json(
+            { error: 'Profile photo must be a valid JPG, PNG, or WebP image under the upload limit.' },
+            { status: 400 }
+          );
+        }
+        normalizedProfilePhoto = profilePhoto;
+      }
+    }
 
     // Flexible parser that converts valid numbers, preserves explicit nulls (for clearing fields), or returns undefined
     const parseNum = (val) => {
@@ -170,6 +191,7 @@ export async function PUT(req) {
     const updatePayload = {
       ...restFields,
       ...numericFields,
+      ...(profilePhoto !== undefined && { profilePhoto: normalizedProfilePhoto }),
       ...(username !== undefined && { username }),
       ...(firstName !== undefined && { firstName }),
       ...(lastName !== undefined && { lastName }),
@@ -183,9 +205,11 @@ export async function PUT(req) {
       ...(timezone !== undefined && { timezone }),
       ...(weightUnit !== undefined && { weightUnit }),
       ...(activityLevel !== undefined && { activityLevel }),
-      nutritionalStrategy: effectiveStrategy,
-      weeklyGoal: effectiveStrategy,
-      weeklyPace: effectiveStrategy,
+      ...(effectiveStrategy !== undefined && {
+        nutritionalStrategy: effectiveStrategy,
+        weeklyGoal: effectiveStrategy,
+        weeklyPace: effectiveStrategy,
+      }),
       ...(startingWeightDate !== undefined && { startingWeightDate }),
       updatedAt: new Date(),
     };

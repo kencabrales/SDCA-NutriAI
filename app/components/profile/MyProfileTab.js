@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import Image from 'next/image';
 import {
   User,
   Camera,
@@ -27,7 +28,6 @@ export default function MyProfileTab({ user, onUpdateUser, onNavigateToGoals }) 
     weightUnit: 'kg',
     sex: 'male',
     dob: '',
-    location: '',
     email: '',
   });
 
@@ -81,7 +81,6 @@ export default function MyProfileTab({ user, onUpdateUser, onNavigateToGoals }) 
       weightUnit: userWeightUnit,
       sex: user.sex || user.gender || 'male',
       dob: formattedDob,
-      location: user.location || user.country || '',
       email: user.email || '',
     });
   }, [user]);
@@ -92,6 +91,110 @@ export default function MyProfileTab({ user, onUpdateUser, onNavigateToGoals }) 
       ...prev,
       [name]: value,
     }));
+  };
+
+  const photoInputRef = useRef(null);
+  const [photoSaving, setPhotoSaving] = useState(false);
+  const [photoMessage, setPhotoMessage] = useState('');
+
+  const persistProfilePhoto = async (profilePhoto) => {
+    setPhotoSaving(true);
+    setPhotoMessage('');
+    setError('');
+
+    try {
+      const response = await fetch('/api/user/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user?._id || user?.id,
+          profilePhoto,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || 'Could not save your profile photo.');
+      }
+
+      // Update the shared dashboard/profile user state without copying private
+      // fields returned by the existing profile endpoint into localStorage.
+      if (onUpdateUser) {
+        await onUpdateUser({ profilePhoto });
+      }
+      setPhotoMessage(profilePhoto ? 'Profile photo updated.' : 'Profile photo removed.');
+    } catch (photoError) {
+      setError(photoError.message || 'Could not save your profile photo.');
+    } finally {
+      setPhotoSaving(false);
+    }
+  };
+
+  const handlePhotoFileChange = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setError('Choose a JPG, PNG, or WebP image.');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setError('Choose an image smaller than 8 MB.');
+      return;
+    }
+
+    setPhotoSaving(true);
+    setPhotoMessage('');
+    setError('');
+
+    try {
+      const compressedPhoto = await new Promise((resolve, reject) => {
+        const objectUrl = URL.createObjectURL(file);
+        const image = new window.Image();
+
+        image.onload = () => {
+          try {
+            const maxDimension = 384;
+            const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
+            const width = Math.max(1, Math.round(image.width * scale));
+            const height = Math.max(1, Math.round(image.height * scale));
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const context = canvas.getContext('2d');
+            if (!context) throw new Error('Your browser could not process this image.');
+
+            context.drawImage(image, 0, 0, width, height);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.78);
+            URL.revokeObjectURL(objectUrl);
+
+            if (dataUrl.length > 700000) {
+              reject(new Error('This image is still too large after compression. Try a simpler image.'));
+              return;
+            }
+            resolve(dataUrl);
+          } catch (processingError) {
+            URL.revokeObjectURL(objectUrl);
+            reject(processingError);
+          }
+        };
+
+        image.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
+          reject(new Error('The selected image could not be opened.'));
+        };
+        image.src = objectUrl;
+      });
+
+      await persistProfilePhoto(compressedPhoto);
+    } catch (photoError) {
+      setError(photoError.message || 'Could not process this image.');
+      setPhotoSaving(false);
+    }
+  };
+
+  const handleRemoveProfilePhoto = async () => {
+    await persistProfilePhoto('');
   };
 
   const handleSubmit = async (e) => {
@@ -126,7 +229,6 @@ export default function MyProfileTab({ user, onUpdateUser, onNavigateToGoals }) 
         weightUnit: formData.weightUnit,
         sex: formData.sex,
         dob: formData.dob,
-        location: formData.location,
       };
 
       const res = await fetch('/api/user/profile', {
@@ -214,17 +316,66 @@ export default function MyProfileTab({ user, onUpdateUser, onNavigateToGoals }) 
         </div>
 
         {/* PROFILE PHOTO */}
-        <div className="flex items-center justify-between py-3 px-2 border-b border-gray-800/50">
+        <div className="flex items-center justify-between gap-4 py-3 px-2 border-b border-gray-800/50">
           <span className="text-xs sm:text-sm font-medium text-gray-300">Profile Photo</span>
-          <div className="relative group cursor-pointer">
-            <div className="w-9 h-9 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
-              <User className="w-5 h-5" />
+          <div className="flex min-w-0 items-center gap-3">
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={handlePhotoFileChange}
+              className="hidden"
+              aria-label="Choose a profile photo"
+            />
+            <button
+              type="button"
+              onClick={() => photoInputRef.current?.click()}
+              disabled={!isEditing || photoSaving}
+              aria-label="Upload profile photo"
+              className="relative h-12 w-12 shrink-0 overflow-hidden rounded-full border border-emerald-500/40 bg-emerald-500/20 text-emerald-400 disabled:cursor-not-allowed"
+              title={isEditing ? 'Change profile photo' : 'Select Edit Profile to change your photo'}
+            >
+              {user?.profilePhoto ? (
+                <Image
+                  src={user.profilePhoto}
+                  alt="Current profile photo"
+                  width={48}
+                  height={48}
+                  unoptimized
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <User className="mx-auto h-6 w-6" />
+              )}
+              {isEditing && (
+                <span className="absolute inset-0 flex items-center justify-center bg-black/45 text-white">
+                  <Camera className="h-4 w-4" />
+                </span>
+              )}
+            </button>
+            <div className="min-w-0 text-right">
+              {isEditing ? (
+                <>
+                  <p className="text-[10px] text-gray-500">JPG, PNG or WebP · up to 8 MB</p>
+                  {user?.profilePhoto && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveProfilePhoto}
+                      disabled={photoSaving}
+                      className="mt-1 text-[11px] font-semibold text-red-400 hover:text-red-300 disabled:opacity-50"
+                    >
+                      Remove photo
+                    </button>
+                  )}
+                </>
+              ) : (
+                <span className="text-xs text-gray-500">
+                  {user?.profilePhoto ? 'Photo saved' : 'No photo added'}
+                </span>
+              )}
+              {photoSaving && <p className="mt-1 text-[10px] text-emerald-400">Saving photo…</p>}
+              {photoMessage && <p className="mt-1 text-[10px] text-emerald-400">{photoMessage}</p>}
             </div>
-            {isEditing && (
-              <div className="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center text-white">
-                <Camera className="w-3.5 h-3.5" />
-              </div>
-            )}
           </div>
         </div>
 
@@ -324,24 +475,6 @@ export default function MyProfileTab({ user, onUpdateUser, onNavigateToGoals }) 
           ) : (
             <span className="text-xs sm:text-sm font-semibold text-emerald-400">
               {formatDateDisplay(formData.dob)}
-            </span>
-          )}
-        </div>
-
-        {/* LOCATION */}
-        <div className="flex items-center justify-between py-3.5 px-2 border-b border-gray-800/50">
-          <span className="text-xs sm:text-sm font-medium text-gray-300">Location</span>
-          {isEditing ? (
-            <input
-              type="text"
-              name="location"
-              value={formData.location}
-              onChange={handleChange}
-              className="bg-[#1C2638] border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white text-right focus:outline-none focus:border-[#00A86B]"
-            />
-          ) : (
-            <span className="text-xs sm:text-sm font-semibold text-emerald-400">
-              {formData.location || 'Not set'}
             </span>
           )}
         </div>
