@@ -44,9 +44,14 @@ useEffect(() => {
   if (isOpen && user) {
     setFormData({ ...user });
     setWeightUnit(user.weightUnit === 'lbs' ? 'lbs' : 'kg');
+  }
+}, [isOpen, user]);
+
+useEffect(() => {
+  if (isOpen) {
     setActiveTab(initialTab || 'menu');
   }
-}, [isOpen, user, initialTab]);
+}, [isOpen, initialTab]);
 
 if (!isOpen) return null;
 
