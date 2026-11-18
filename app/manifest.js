@@ -4,7 +4,7 @@ export default function manifest() {
   return {
     name: 'NutriAI',
     short_name: 'NutriAI',
-    description: 'Real-time weight logs and food macro tracking via IoT smart plate interface',
+    description: 'Food and nutrition tracking with offline support',
     start_url: '/dashboard',
     display: 'standalone',
     background_color: '#0B121F',

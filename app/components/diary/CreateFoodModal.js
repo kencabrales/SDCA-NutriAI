@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { X, ArrowLeft, ArrowRight, Check, Loader2, ChevronDown } from 'lucide-react';
+import { X, ArrowLeft, ArrowRight, Check, Loader2, ChevronDown } from 'lucide-react';\nimport { cacheFoods, saveCustomFoodOffline } from '@/lib/offlineStore';
 
 const MICRO_FIELDS = [
   { label: 'Saturated Fat (g)', name: 'satFat' },
@@ -190,14 +190,14 @@ export default function CreateFoodModal({
           `Successfully ${foodToEdit ? 'updated' : 'added'} "${payload.foodName}" to database.`,
           'success'
         );
-        onSuccess?.(data.food || payload);
+        if (!foodToEdit) await cacheFoods(userId, [data.food || payload]);\n        notifySaved(data.food || payload);
         handleClose();
       } else {
         showToastNotification?.('Error', data.message || 'Failed to save custom food.', 'error');
       }
     } catch (err) {
       console.error('Error saving custom food:', err);
-      showToastNotification?.('Error', 'Network error while saving custom food.', 'error');
+      if (!foodToEdit && (!navigator.onLine || err instanceof TypeError)) {\n        try { const food = await saveCustomFoodOffline(userId, payload); showToastNotification?.('Food Saved Offline', `\"${payload.foodName}\" is saved on this device and will sync when online.`, 'success'); notifySaved(food); handleClose(); }\n        catch (storageError) { console.error(storageError); showToastNotification?.('Offline Save Failed', 'Could not save this food on your device.', 'error'); }\n      } else showToastNotification?.('Error', 'Network error while saving custom food.', 'error');
     } finally {
       setIsSubmitting(false);
     }
