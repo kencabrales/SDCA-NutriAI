@@ -8,10 +8,7 @@ import {
   User,
   Target,
   Scale,
-  Footprints,
   PieChart,
-  Utensils,
-  Bell,
   ShieldCheck,
   HelpCircle,
   LogOut,
@@ -26,6 +23,8 @@ import RecipesTab from './RecipesTab';
 import WeightProgressTab from './WeightProgressTab';
 import NutritionTab from './NutritionTab';
 import StepsTab from './StepsTab';
+import PrivacyTab from './PrivacyTab';
+import HelpTab from './HelpTab';
 
 // Shared themed scrollbar (Chromium/WebKit) + Firefox fallback, matching the app's dark palette.
 const scrollbarClasses =
@@ -105,14 +104,6 @@ if (!isOpen) return null;
     //   bgColor: 'bg-orange-500/10',
     //   action: () => setActiveTab('meals'),
     // },
-    {
-      id: 'reminders',
-      label: 'Reminders',
-      icon: Bell,
-      color: 'text-purple-400',
-      bgColor: 'bg-purple-500/10',
-      action: () => setActiveTab('reminders'),
-    },
     {
       id: 'privacy',
       label: 'Privacy',
@@ -274,6 +265,18 @@ if (!isOpen) return null;
 
           {activeTab === 'steps' && (
             <StepsTab user={user} />
+          )}
+
+          {activeTab === 'privacy' && (
+            <div className="p-5">
+              <PrivacyTab user={user} />
+            </div>
+          )}
+
+          {activeTab === 'help' && (
+            <div className="p-5">
+              <HelpTab />
+            </div>
           )}
         </div>
 

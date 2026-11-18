@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { User, Zap, Flame, TrendingDown } from 'lucide-react';
 
 export default function ProfileHeader({ user, targetCalories }) {
@@ -69,8 +70,19 @@ export default function ProfileHeader({ user, targetCalories }) {
         {/* Center: Avatar, Username & Calorie Goal */}
         <div className="flex flex-col items-center text-center">
           <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-emerald-500 to-cyan-500 p-0.5 shadow-md mb-2">
-            <div className="w-full h-full rounded-full bg-[#0B121F] flex items-center justify-center">
-              <User className="w-8 h-8 text-emerald-400" />
+            <div className="w-full h-full overflow-hidden rounded-full bg-[#0B121F] flex items-center justify-center">
+              {user?.profilePhoto ? (
+                <Image
+                  src={user.profilePhoto}
+                  alt="Profile photo"
+                  width={64}
+                  height={64}
+                  unoptimized
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <User className="w-8 h-8 text-emerald-400" />
+              )}
             </div>
           </div>
 
