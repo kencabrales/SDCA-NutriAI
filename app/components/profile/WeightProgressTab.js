@@ -690,7 +690,7 @@ export default function WeightProgressTab({ user, onUpdateUser }) {
 
         <p className="text-[9px] leading-relaxed text-gray-500">
           This is a straight-line estimate, not a promise. Actual progress varies with nutrition, activity, health, and normal weight fluctuations.
-          For weight loss, gradual progress around 1–2 lb per week is a general adult guideline, not a target that suits everyone.
+          The selected pace is a planning assumption, not a nutrition recommendation. A suitable pace depends on the person's health and circumstances.
         </p>
       </div>
 
