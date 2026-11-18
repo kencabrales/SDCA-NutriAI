@@ -170,12 +170,6 @@ export default function GoalsTab({
     heavy: 'Heavy (6-7 Days/Wk)',
   };
 
-  const strategyLabels = {
-    cut: 'Cut (pace-based deficit)',
-    maintain: 'Maintain',
-    bulk: 'Bulk (+500 kcal)',
-  };
-
   const triggerChange = (name, value) => {
     handleChange({ target: { name, value } });
   };
@@ -228,6 +222,12 @@ export default function GoalsTab({
     ? Math.max(0, pacePreview.tdee - pacePreview.targetCalories)
     : estimatedDailyDeficit;
   const paceLimitedByCalorieFloor = nutritionalStrategy === 'cut' && effectiveDailyDeficit < estimatedDailyDeficit;
+  const displayedCutDeficit = nutritionalStrategy === 'cut' ? effectiveDailyDeficit : estimatedDailyDeficit;
+  const strategyLabels = {
+    cut: `Cut (-${displayedCutDeficit} kcal)`,
+    maintain: 'Maintain',
+    bulk: 'Bulk (+500 kcal)',
+  };
 
   // Recomputes the suggested calorie target (Mifflin-St Jeor + activity + strategy)
   // and applies it immediately. Called ONLY from the onChange handlers below —
