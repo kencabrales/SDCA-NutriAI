@@ -94,6 +94,8 @@ export async function POST(request) {
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
     }
 
+    if (body.clientMutationId && !(items && Array.isArray(items) && items.length)) { const existing = await FoodLog.findOne({ userId, clientMutationId: body.clientMutationId }).lean(); if (existing) return NextResponse.json({ message: 'Already logged', log: existing, alreadySynced: true }, { status: 200 }); }
+
     // --- BATCH INSERTION ---
     if (items && Array.isArray(items) && items.length > 0) {
       const invalidItem = items.find((item) => !item.foodName && !item.name ||
@@ -204,7 +206,8 @@ export async function POST(request) {
       vitaminB12: parseFloat(body.vitaminB12) || 0,
       vitaminD: parseFloat(body.vitaminD) || 0,
       logDate: targetedDateString,
-      date: targetedDateString
+      date: targetedDateString,
+      ...(body.clientMutationId ? { clientMutationId: body.clientMutationId } : {})
     });
 
     await handleStreakUpdate(userId);

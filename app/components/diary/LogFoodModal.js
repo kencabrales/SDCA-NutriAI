@@ -10,6 +10,7 @@ import CreateMealModal from './CreateMealModal';
 import CreateRecipeModal from './CreateRecipeModal';
 import FoodDetailModal from './FoodDetailModal';
 import { useConfirm } from '../ConfirmContext';
+import { cacheFoods, getCachedFoods } from '@/lib/offlineStore';
 
 export default function LogFoodModal({ 
   isOpen, 
@@ -86,6 +87,9 @@ const [clearedIds, setClearedIds] = useState([]);
     setIsLoadingTab(true);
 
     try {
+      const cachedFoods = await getCachedFoods(userId).catch(() => []);
+      if (cachedFoods.length) setCustomFoods(cachedFoods);
+
       const [logsRes, foodsRes, recipesRes, mealsRes] = await Promise.all([
         fetch(`/api/food-log?userId=${userId}&limit=50`),
         fetch(`/api/custom-food?userId=${userId}`),
@@ -109,6 +113,7 @@ const [clearedIds, setClearedIds] = useState([]);
       if (foodsRes.ok) {
         const foodsData = await foodsRes.json();
         setCustomFoods(foodsData.foods || []);
+        await cacheFoods(userId, foodsData.foods || []).catch(() => {});
       }
       
       if (recipesRes.ok) {
@@ -138,6 +143,7 @@ const [clearedIds, setClearedIds] = useState([]);
     setIsSearching(true);
     const timer = setTimeout(async () => {
       try {
+        if (!navigator.onLine) { const cached = await getCachedFoods(userId); setSearchResults(cached.filter(f => String(f.foodName||'').toLowerCase().includes(trimmed.toLowerCase()) || String(f.brandName||'').toLowerCase().includes(trimmed.toLowerCase()))); return; }
         const res = await fetch(`/api/search-food?q=${encodeURIComponent(trimmed)}`);
         const data = await res.json();
         if (data.success) {

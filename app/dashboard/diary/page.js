@@ -10,6 +10,7 @@ import SearchFoodModal from '../../components/diary/LogFoodModal';
 import FoodDetailModal from '../../components/diary/FoodDetailModal';
 import CreateRecipeModal from '../../components/diary/CreateRecipeModal';
 import CreateMealModal from '../../components/diary/CreateMealModal';
+import { getLogs, cacheLogs, saveLogOffline, getWater, saveWater } from '@/lib/offlineStore';
 import Toast from '../../components/Toast';
 import MacroRecommendations from '../../components/MacroRecommendations';
 import { ConfirmProvider, useConfirm } from '../../components/ConfirmContext';
@@ -67,6 +68,9 @@ function FoodDiaryContent() {
 
 const fetchWaterForDate = useCallback(async (userId, dateStr) => {
   if (!userId || !dateStr) return;
+  const cachedAmount = await getWater(userId, dateStr).catch(() => 0);
+  setWaterAmount(cachedAmount);
+  if (!navigator.onLine) return;
   try {
     const response = await fetch(`/api/water-log?userId=${encodeURIComponent(userId)}&date=${dateStr}`, { cache: 'no-store' });
     const data = await response.json().catch(() => ({}));
@@ -74,6 +78,7 @@ const fetchWaterForDate = useCallback(async (userId, dateStr) => {
 
     if (data.log) {
       setWaterAmount(Number(data.log.amountMl) || 0);
+      await saveWater(userId, dateStr, Number(data.log.amountMl) || 0, false).catch(() => {});
       return;
     }
 
@@ -103,11 +108,15 @@ const fetchWaterForDate = useCallback(async (userId, dateStr) => {
 
 const fetchDailyLogs = useCallback(async (userId, dateStr) => {
   if (!dateStr || !userId) return;
+  const cached = await getLogs(userId, dateStr).catch(() => []);
+  if (cached.length) setLogs(cached);
+  if (!navigator.onLine) return;
   try {
     const res = await fetch(`/api/food-log?userId=${userId}&date=${dateStr}`);
     if (res.ok) {
       const data = await res.json();
-      setLogs(data.logs || []);
+      await cacheLogs(userId, dateStr, data.logs || []).catch(() => {});
+      setLogs(await getLogs(userId, dateStr).catch(() => data.logs || []));
     }
   } catch (err) {
     console.error("Database tracking sync crash:", err);
@@ -211,15 +220,21 @@ useEffect(() => {
   const handleConfirmAddFood = async (foodPayload) => {
     if (!currentDate || !user) return;
     setLoading(true);
+    const userId = user.id || user._id;
+    const clientMutationId = crypto.randomUUID ? crypto.randomUUID() : `offline-${Date.now()}-${Math.random()}`;
+    const queuedPayload = { ...foodPayload, clientMutationId };
+    if (!navigator.onLine) { try { const localLog = await saveLogOffline(userId, currentDate, queuedPayload); setLogs(previous => [...previous, localLog]); showToastNotification('Saved Offline', 'Food entry saved on this device and will sync when online.', 'success'); } catch (error) { showToastNotification('Offline Save Failed', 'Could not save this entry on your device.', 'error'); } finally { setLoading(false); } return; }
     try {
       const res = await fetch('/api/food-log', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id || user._id, date: currentDate, ...foodPayload })
+        body: JSON.stringify({ userId, date: currentDate, ...queuedPayload })
       });
 
 if (res.ok) {
-  fetchDailyLogs(user.id || user._id, currentDate);
+  const savedData = await res.json().catch(() => ({}));
+  if (savedData.log) await cacheLogs(userId, currentDate, [savedData.log]).catch(() => {});
+  fetchDailyLogs(userId, currentDate);
   // Logging food does not trigger another AI request; keep the daily insight cached.
   const userRes = await fetch(`/api/user/profile?userId=${user.id || user._id}`);
         if (userRes.ok) {
@@ -236,7 +251,7 @@ if (res.ok) {
       }
     } catch (err) {
       console.error(err);
-      showToastNotification('Network Error', 'Could not connect to the server.', 'error');
+      if (err instanceof TypeError || !navigator.onLine) { try { const localLog = await saveLogOffline(userId, currentDate, queuedPayload); setLogs(previous => [...previous, localLog]); showToastNotification('Saved Offline', 'Food entry saved on this device and will sync when online.', 'success'); } catch { showToastNotification('Offline Save Failed', 'Could not save this entry on your device.', 'error'); } } else showToastNotification('Network Error', 'Could not connect to the server.', 'error');
     } finally {
       setLoading(false);
     }
