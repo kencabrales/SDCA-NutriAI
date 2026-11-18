@@ -87,7 +87,8 @@ export async function POST(req) {
       vitaminB12Goal: body.vitaminB12Goal,
       vitaminDGoal: body.vitaminDGoal,
 
-      createdBy: body.userId
+      createdBy: body.userId,
+      ...(body.clientMutationId ? { clientMutationId: body.clientMutationId } : {})
     });
 
     return NextResponse.json({ success: true, food: newCustomFood }, { status: 201 });
