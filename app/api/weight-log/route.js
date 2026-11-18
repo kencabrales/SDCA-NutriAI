@@ -74,7 +74,13 @@ export async function POST(req) {
       return NextResponse.json({ error: 'userId and a valid weight are required' }, { status: 400 });
     }
 
-    if (!['kg', 'lbs'].includes(unit)) {\n      return NextResponse.json({ error: 'Weight unit must be kg or lbs.' }, { status: 400 });\n    }\n\n    const logDate = date ? new Date(date) : new Date();
+    if (!['kg', 'lbs'].includes(unit)) {
+      return NextResponse.json(
+        { error: 'Weight unit must be kg or lbs.' },
+        { status: 400 }
+      );
+    }
+\n    const logDate = date ? new Date(date) : new Date();
     if (isNaN(logDate.getTime())) {
       return NextResponse.json({ error: 'Invalid date' }, { status: 400 });
     }
