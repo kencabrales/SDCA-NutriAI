@@ -409,9 +409,10 @@ export default function RegisterModal({ isOpen, onClose, onSwitchToLogin }) {
                 <input
                   type={showPassword ? 'text' : 'password'}
                   required
-                  minLength={6}
+                  minLength={8}
+                  maxLength={128}
                   name="password"
-                  placeholder="Password"
+                  placeholder="Password (8+ chars, uppercase and number)"
                   value={accountForm.password}
                   onChange={handleAccountChange}
                   className="w-full bg-[#1C2638] border border-gray-800 rounded-xl pl-10 pr-10 py-3 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-[#00A86B]"
