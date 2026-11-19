@@ -78,6 +78,10 @@ export async function POST(request) {
     if (!emailResponse.ok) {
       const providerDetails = await emailResponse.text().catch(() => '');
       console.error('NutriAI password reset email failed:', emailResponse.status, providerDetails.slice(0, 500));
+      await User.updateOne(
+        { _id: user._id, passwordResetTokenHash: sha256(token) },
+        { $unset: { passwordResetTokenHash: 1, passwordResetExpiresAt: 1 } }
+      );
       // Keep the response generic so the endpoint does not reveal whether an
       // account exists when the email provider has an outage.
     }
