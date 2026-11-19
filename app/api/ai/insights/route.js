@@ -55,6 +55,42 @@ function sum(logs, field) {
   return Math.round(logs.reduce((total, log) => total + (Number(log[field]) || 0), 0) * 10) / 10;
 }
 
+function buildNutritionObservation(dailySummaries, profile) {
+  const loggedDays = dailySummaries.filter((day) => day.meals.length > 0);
+  if (!loggedDays.length) return null;
+
+  const highSugarEntries = loggedDays.flatMap((day) =>
+    day.meals
+      .filter((meal) => Number(meal.sugar) >= 15)
+      .map((meal) => ({ ...meal, date: day.date }))
+  );
+  const sugarReference = Number(profile.dailyTargets?.sugar) > 0
+    ? Number(profile.dailyTargets.sugar)
+    : 50;
+  const highSugarDays = loggedDays.filter((day) => Number(day.sugar) >= sugarReference);
+
+  if (highSugarDays.length >= 2) {
+    return `Your food logs recorded at least ${sugarReference} g of total sugar on ${highSugarDays.length} of ${loggedDays.length} logged days. Try limiting the frequency and portions of foods or drinks with added/free sugars. Repeatedly high added/free sugar intake can contribute to unhealthy weight gain and is associated with type 2 diabetes risk. Your food records show total sugar and cannot distinguish added sugar from naturally occurring sugar, so this is a pattern to review—not a diagnosis or a prediction that you will develop diabetes.`;
+  }
+
+  if (highSugarEntries.length) {
+    const entry = highSugarEntries[0];
+    return `The logged serving of ${String(entry.food || 'this food').slice(0, 80)} contains ${Number(entry.sugar).toFixed(1)} g of recorded total sugar. Keep an eye on serving size and how often you choose foods or drinks with added/free sugars. This value may include naturally occurring sugar, and one food does not mean you have or will develop diabetes.`;
+  }
+
+  const highSodiumDays = loggedDays.filter((day) => Number(day.sodium) >= 2300);
+  if (highSodiumDays.length >= 2) {
+    return `Your food logs recorded 2,300 mg or more of sodium on ${highSodiumDays.length} of ${loggedDays.length} logged days. Frequently high sodium intake can contribute to high blood pressure. Check packaged-food labels and seasonings, and compare your portions. This observation is based only on nutrient values recorded in NutriAI.`;
+  }
+
+  const highSatFatDays = loggedDays.filter((day) => Number(day.satFat) >= 20);
+  if (highSatFatDays.length >= 2) {
+    return `Your food logs recorded 20 g or more of saturated fat on ${highSatFatDays.length} of ${loggedDays.length} logged days. Consider balancing foods high in saturated fat with options containing unsaturated fats. This is a nutrition pattern to review, not a medical diagnosis.`;
+  }
+
+  return null;
+}
+
 function toPayload(insight, extra = {}) {
   return { mealSuggestion: insight?.mealSuggestion || null, behaviorInsight: insight?.behaviorInsight || null, healthRisk: insight?.healthRisk || null, ...extra };
 }
@@ -140,18 +176,27 @@ export async function GET(req) {
       return {
         date, calories: sum(dayLogs, 'calories'), protein: sum(dayLogs, 'protein'),
         carbs: sum(dayLogs, 'carbs'), fat: sum(dayLogs, 'fat'),
+        sugar: sum(dayLogs, 'sugar'), sodium: sum(dayLogs, 'sodium'),
+        fiber: sum(dayLogs, 'fiber'), satFat: sum(dayLogs, 'satFat'),
         meals: dayLogs.map((log) => ({
           food: log.foodName, meal: log.mealType, calories: Number(log.calories) || 0,
           protein: Number(log.protein) || 0, carbs: Number(log.carbs) || 0, fat: Number(log.fat) || 0,
+          sugar: Number(log.sugar) || 0, sodium: Number(log.sodium) || 0,
+          fiber: Number(log.fiber) || 0, satFat: Number(log.satFat) || 0,
+          amount: Number(log.amount) || null, unit: log.unit || null,
         })),
       };
     });
     const todayTotals = {
       calories: sum(todayLogs, 'calories'), protein: sum(todayLogs, 'protein'),
       carbs: sum(todayLogs, 'carbs'), fat: sum(todayLogs, 'fat'),
+      sugar: sum(todayLogs, 'sugar'), sodium: sum(todayLogs, 'sodium'),
+      fiber: sum(todayLogs, 'fiber'), satFat: sum(todayLogs, 'satFat'),
       foods: todayLogs.map((log) => ({
         name: log.foodName, meal: log.mealType, calories: Number(log.calories) || 0,
         protein: Number(log.protein) || 0, carbs: Number(log.carbs) || 0, fat: Number(log.fat) || 0,
+        sugar: Number(log.sugar) || 0, sodium: Number(log.sodium) || 0,
+        fiber: Number(log.fiber) || 0, satFat: Number(log.satFat) || 0,
       })),
     };
 
@@ -163,7 +208,16 @@ export async function GET(req) {
       goal: user.goal || user.nutritionalStrategy || user.weeklyGoal || 'maintain',
       nutritionalStrategy: user.nutritionalStrategy || user.weeklyPace || user.weeklyGoal || 'maintain',
       activityLevel: user.activityLevel || null,
-      dailyTargets: { calories: user.targetCalories || null, protein: user.targetProtein || user.proteinGrams || null, carbs: user.targetCarbs || user.carbsGrams || null, fat: user.targetFat || user.fatGrams || null },
+      dailyTargets: {
+        calories: user.targetCalories || null,
+        protein: user.targetProtein || user.proteinGrams || null,
+        carbs: user.targetCarbs || user.carbsGrams || null,
+        fat: user.targetFat || user.fatGrams || null,
+        sugar: user.sugarGoal || null,
+        sodium: user.sodiumGoal || null,
+        fiber: user.fiberGoal || null,
+        satFat: user.satFatGoal || null,
+      },
       dietaryPreferences: user.dietaryPreferences || user.dietType || user.dietaryRestrictions || null,
     };
 
@@ -171,6 +225,7 @@ export async function GET(req) {
     const insightsFingerprint = createHash('sha256')
       .update(JSON.stringify({ dailySummaries, profile }))
       .digest('hex');
+    const nutritionObservation = buildNutritionObservation(dailySummaries, profile);
     const cached = await AIInsight.findOne({ userId, date: today }).lean();
     if (!forceRefresh && cached && cached.insightsFingerprint === insightsFingerprint) {
       await recordAIUsage({ userId, feature: 'daily-insights-cache', status: 'cached' });
@@ -222,13 +277,14 @@ export async function GET(req) {
       }));
     }
 
-    const compactHistory = dailySummaries.map(({ date, calories, protein, carbs, fat, meals }) => ({
-      date, calories, protein, carbs, fat,
-      foods: meals.slice(0, 8).map(({ food, meal }) => ({ food, meal })),
+    const compactHistory = dailySummaries.map(({ date, calories, protein, carbs, fat, sugar, sodium, fiber, satFat, meals }) => ({
+      date, calories, protein, carbs, fat, sugar, sodium, fiber, satFat,
+      foods: meals.slice(0, 8),
     }));
     const prompt = [
       'You are NutriAI, a careful nutrition coach. Use only the supplied data; do not invent facts or diagnose.',
-      'Return ONLY JSON: {"mealSuggestion":"one concise next-meal idea with a brief reason","behaviorInsight":"one concise evidence-based observation using actual numbers","healthRisk":null}. Set healthRisk only for a repeated, clearly supported nutrition concern; otherwise null.',
+      'Return ONLY JSON: {"mealSuggestion":"one concise next-meal idea with a brief reason","behaviorInsight":"one concise evidence-based observation using actual numbers","healthRisk":"a concise Nutrition Observation or null"}.',
+      'For healthRisk, look at recorded sugar, sodium and saturated-fat amounts across the logged days. When the data supports a concern, give one specific, non-alarmist observation with actual amounts and a practical suggestion. Do not say a single food causes diabetes, do not predict that this user will develop a disease, and do not diagnose. Distinguish total sugar in the food records from added/free sugar; the values may include naturally occurring sugar. If the logged nutrients are incomplete or no pattern is supported, return null.',
       'Profile and daily targets:', JSON.stringify(profile),
       'Today totals and foods:', JSON.stringify(todayTotals),
       'Last seven days (daily totals and up to eight food names per day):', JSON.stringify(compactHistory),
@@ -258,7 +314,7 @@ export async function GET(req) {
         const insight = {
           mealSuggestion: typeof result.mealSuggestion === 'string' ? result.mealSuggestion : null,
           behaviorInsight: typeof result.behaviorInsight === 'string' ? result.behaviorInsight : null,
-          healthRisk: typeof result.healthRisk === 'string' ? result.healthRisk : null,
+          healthRisk: typeof result.healthRisk === 'string' && result.healthRisk.trim() ? result.healthRisk.trim() : nutritionObservation,
         };
         if (!insight.mealSuggestion || !insight.behaviorInsight) {
           throw new Error('Gemini returned an incomplete daily insight response.');
@@ -371,7 +427,7 @@ export async function GET(req) {
       return NextResponse.json({
         mealSuggestion: null,
         behaviorInsight: null,
-        healthRisk: null,
+        healthRisk: nutritionObservation,
         warning,
         retryAfterSeconds: cooldownMs ? Math.ceil(cooldownMs / 1000) : null,
       }, {
