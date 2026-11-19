@@ -34,3 +34,18 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+
+## Password reset email configuration
+
+Password reset emails are sent through Resend. Configure these server-side environment variables in local `.env.local` and the deployment environment (for example, Vercel Project Settings):
+
+- `RESEND_API_KEY`: Resend API key. Keep this secret; do not prefix it with `NEXT_PUBLIC_`.
+- `EMAIL_FROM`: A sender address verified with Resend, for example `NutriAI <security@your-verified-domain.example>`.
+- `APP_URL`: The public origin of this NutriAI deployment, for example `https://your-app.example`. This is used to build password-reset links.
+
+Password reset links expire after 30 minutes and are single-use. The application stores only a hash of each reset token.
+
+## Password requirements
+
+New passwords must be 8–128 characters long and contain at least one uppercase letter and one number. Special characters are optional. Passwords are stored using bcrypt. Existing legacy plaintext-password accounts are upgraded to bcrypt hashes after a successful login.
