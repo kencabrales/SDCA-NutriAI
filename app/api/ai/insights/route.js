@@ -249,7 +249,7 @@ export async function GET(req) {
         }));
       }
       return NextResponse.json({
-        mealSuggestion: null, behaviorInsight: null, healthRisk: null, warning, retryAfterSeconds,
+        mealSuggestion: null, behaviorInsight: null, healthRisk: nutritionObservation, warning, retryAfterSeconds,
       }, { status: 503, headers: { 'Retry-After': String(retryAfterSeconds) } });
     }
 
