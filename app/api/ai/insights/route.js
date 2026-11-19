@@ -365,6 +365,7 @@ export async function GET(req) {
         if (latest?.insightsFingerprint === insightsFingerprint) {
           return NextResponse.json(toPayload(latest, {
             cached: true,
+            healthRisk: latest.healthRisk || nutritionObservation,
             message: 'Showing the latest analysis for your current food logs.',
           }));
         }
