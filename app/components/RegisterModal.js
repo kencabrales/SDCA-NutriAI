@@ -249,8 +249,20 @@ export default function RegisterModal({ isOpen, onClose, onSwitchToLogin }) {
       setError('Passwords do not match');
       return;
     }
-    if (accountForm.password.length < 6) {
-      setError('Password must be at least 6 characters');
+    if (accountForm.password.length < 8) {
+      setError('Password must be at least 8 characters long');
+      return;
+    }
+    if (!/[A-Z]/.test(accountForm.password)) {
+      setError('Password must contain at least one uppercase letter');
+      return;
+    }
+    if (!/[0-9]/.test(accountForm.password)) {
+      setError('Password must contain at least one number');
+      return;
+    }
+    if (accountForm.password.length > 128) {
+      setError('Password cannot exceed 128 characters');
       return;
     }
     setStep(2);
@@ -397,9 +409,10 @@ export default function RegisterModal({ isOpen, onClose, onSwitchToLogin }) {
                 <input
                   type={showPassword ? 'text' : 'password'}
                   required
-                  minLength={6}
+                  minLength={8}
+                  maxLength={128}
                   name="password"
-                  placeholder="Password"
+                  placeholder="Password (8+ chars, uppercase and number)"
                   value={accountForm.password}
                   onChange={handleAccountChange}
                   className="w-full bg-[#1C2638] border border-gray-800 rounded-xl pl-10 pr-10 py-3 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-[#00A86B]"

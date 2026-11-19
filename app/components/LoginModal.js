@@ -88,6 +88,16 @@ export default function LoginModal({ isOpen, onClose, onSwitchToRegister, initia
               </button>
             </div>
 
+            <div className="flex justify-end -mt-2">
+              <button
+                type="button"
+                onClick={() => { onClose(); router.push('/forgot-password'); }}
+                className="text-xs font-semibold text-[#00A86B] hover:text-emerald-300 hover:underline transition-colors"
+              >
+                Forgot Password?
+              </button>
+            </div>
+
             <button type="submit" disabled={loading} className="w-full bg-[#00A86B] hover:bg-[#00945D] text-white font-bold py-3.5 rounded-xl transition-all disabled:opacity-50 mt-2 text-sm">
               {loading ? 'Verifying...' : 'Login'}
             </button>

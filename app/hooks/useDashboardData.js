@@ -35,6 +35,8 @@ export function useDashboardData() {
   const [insightsError, setInsightsError] = useState('');
   const [isLoadingInsights, setIsLoadingInsights] = useState(false);
   const insightsRequestInFlight = useRef(false);
+  const pendingInsightsGenerate = useRef(null);
+  const fetchInsightsRef = useRef(null);
   const savedInsightsLoadedForUser = useRef(null);
 
   // --- CALENDAR LOGIC (all via UTC-anchored calendar math — see lib/dateUtils.js) ---
@@ -138,7 +140,18 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
     userId,
     { forceRefresh = false, generate = true, silent = false } = {}
   ) => {
-    if (!userId || insightsRequestInFlight.current) return;
+    if (!userId) return;
+    if (insightsRequestInFlight.current) {
+      // Initial hydration loads saved analysis silently. If the user clicks
+      // Generate Analysis during that request, queue it rather than dropping
+      // the click on the floor.
+      if (generate) {
+        pendingInsightsGenerate.current = { userId, forceRefresh, silent: false };
+        setIsLoadingInsights(true);
+        setInsightsError('');
+      }
+      return;
+    }
     insightsRequestInFlight.current = true;
     if (!silent) setIsLoadingInsights(true);
     if (!silent) setInsightsError('');
@@ -156,6 +169,10 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
         setMealSuggestion(data.mealSuggestion || null);
         setBehaviorInsight(data.behaviorInsight || null);
         setHealthRisk(data.healthRisk || null);
+      } else if (data.healthRisk) {
+        // A data-backed observation can still be shown if Gemini is
+        // temporarily unavailable; do not hide it behind the API warning.
+        setHealthRisk(data.healthRisk);
       }
       setInsightsMessage(data.message || data.warning || '');
 
@@ -171,8 +188,21 @@ setTodaySteps(savedSteps ? parseInt(savedSteps, 10) : 0);
     } finally {
       insightsRequestInFlight.current = false;
       if (!silent) setIsLoadingInsights(false);
+      const pending = pendingInsightsGenerate.current;
+      if (pending) {
+        pendingInsightsGenerate.current = null;
+        // Run the queued explicit request only after the silent hydration
+        // request has fully completed.
+        Promise.resolve().then(() => fetchInsightsRef.current?.(pending.userId, {
+          forceRefresh: pending.forceRefresh,
+          generate: true,
+          silent: false,
+        }));
+      }
     }
   }, []);
+
+  fetchInsightsRef.current = fetchInsights;
 
   const refreshDashboardData = useCallback(async () => {
     const userId = user?.id || user?._id;

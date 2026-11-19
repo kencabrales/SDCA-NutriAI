@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import dbConnect from '@/lib/mongodb';
 import User from '@/lib/User';
+import { getPasswordPolicyError, hashPassword } from '@/lib/passwords';
 
 export async function POST(request) {
   try {
@@ -41,6 +42,9 @@ export async function POST(request) {
     if (termsAccepted !== true || typeof termsVersion !== 'string' || !termsVersion.trim()) {
       return NextResponse.json({ error: 'You must accept the Terms and Conditions before registering.' }, { status: 400 });
     }
+
+    const passwordError = getPasswordPolicyError(password);
+    if (passwordError) return NextResponse.json({ error: passwordError }, { status: 400 });
 
     // Use heightCm or fallback to height
     const rawHeight = heightCm ?? height;
@@ -92,12 +96,16 @@ export async function POST(request) {
     const resolvedProtein = proteinGrams || targetProtein || 150;
     const resolvedFat = fatGrams || targetFat || 44;
 
+    // Hash password before it is stored. Existing legacy accounts are
+    // upgraded lazily after their next successful login.
+    const passwordHash = await hashPassword(password);
+
     // Create user in single MongoDB query
     const newUser = await User.create({
       firstName,
       lastName,
       email: normalizedEmail,
-      password,
+      password: passwordHash,
       termsAccepted: true,
       termsAcceptedAt: new Date(),
       termsVersion: termsVersion.trim(),
@@ -133,7 +141,7 @@ export async function POST(request) {
     return NextResponse.json({
       message: 'Account created successfully!',
       user: {
-        ...newUser.toObject(),
+        ...(() => { const safeUser = newUser.toObject(); delete safeUser.password; return safeUser; })(),
         id: newUser._id.toString(),
         _id: newUser._id.toString()
       }
