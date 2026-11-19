@@ -229,7 +229,7 @@ export async function GET(req) {
     const cached = await AIInsight.findOne({ userId, date: today }).lean();
     if (!forceRefresh && cached && cached.insightsFingerprint === insightsFingerprint) {
       await recordAIUsage({ userId, feature: 'daily-insights-cache', status: 'cached' });
-      return NextResponse.json(toPayload(cached, { cached: true }));
+      return NextResponse.json(toPayload(cached, { cached: true, healthRisk: cached.healthRisk || nutritionObservation }));
     }
 
     if (
@@ -243,6 +243,7 @@ export async function GET(req) {
       if (cached.mealSuggestion || cached.behaviorInsight || cached.healthRisk) {
         return NextResponse.json(toPayload(cached, {
           cached: true,
+          healthRisk: cached.healthRisk || nutritionObservation,
           stale: cached.insightsFingerprint !== insightsFingerprint,
           warning,
           retryAfterSeconds,
@@ -255,7 +256,7 @@ export async function GET(req) {
 
     if (!generateRequested) {
       const hasSavedInsight = Boolean(
-        cached?.mealSuggestion || cached?.behaviorInsight || cached?.healthRisk
+        cached?.mealSuggestion || cached?.behaviorInsight || cached?.healthRisk || nutritionObservation
       );
       const cooldownActive = Boolean(
         cached?.generationFingerprint === insightsFingerprint &&
@@ -267,6 +268,7 @@ export async function GET(req) {
         : null;
 
       return NextResponse.json(toPayload(hasSavedInsight ? cached : null, {
+        healthRisk: cached?.healthRisk || nutritionObservation,
         cached: hasSavedInsight,
         message: hasSavedInsight
           ? 'Showing your saved analysis. Generate again only when you want a new review.'
@@ -397,6 +399,7 @@ export async function GET(req) {
       if (cached && (cached.mealSuggestion || cached.behaviorInsight || cached.healthRisk)) {
         return NextResponse.json(toPayload(cached, {
           cached: true,
+          healthRisk: cached.healthRisk || nutritionObservation,
           stale: cached.insightsFingerprint !== insightsFingerprint,
           warning: 'A fresh AI analysis could not be generated. Showing your last saved analysis.',
         }));
