@@ -249,8 +249,20 @@ export default function RegisterModal({ isOpen, onClose, onSwitchToLogin }) {
       setError('Passwords do not match');
       return;
     }
-    if (accountForm.password.length < 6) {
-      setError('Password must be at least 6 characters');
+    if (accountForm.password.length < 8) {
+      setError('Password must be at least 8 characters long');
+      return;
+    }
+    if (!/[A-Z]/.test(accountForm.password)) {
+      setError('Password must contain at least one uppercase letter');
+      return;
+    }
+    if (!/[0-9]/.test(accountForm.password)) {
+      setError('Password must contain at least one number');
+      return;
+    }
+    if (accountForm.password.length > 128) {
+      setError('Password cannot exceed 128 characters');
       return;
     }
     setStep(2);
