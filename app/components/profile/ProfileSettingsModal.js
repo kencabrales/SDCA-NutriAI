@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   HelpCircle,
   LogOut,
+  KeyRound,
   ChevronRight,
   ArrowLeft
 } from 'lucide-react';
@@ -35,6 +36,10 @@ export default function ProfileSettingsModal({ isOpen, onClose, user, onUpdateUs
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('menu');
   const [saving, setSaving] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [passwordMessage, setPasswordMessage] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSaving, setPasswordSaving] = useState(false);
 
 const [formData, setFormData] = useState({ ...user });
 const [heightUnit, setHeightUnit] = useState('cm');
@@ -60,6 +65,43 @@ if (!isOpen) return null;
     localStorage.removeItem('user');
     if (onClose) onClose();
     router.push('/');
+  };
+
+  const handleChangePassword = async (event) => {
+    event.preventDefault();
+    setPasswordError('');
+    setPasswordMessage('');
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordError('New passwords do not match.');
+      return;
+    }
+    if (passwordForm.newPassword.length < 8 || passwordForm.newPassword.length > 128 ||
+        !/[A-Z]/.test(passwordForm.newPassword) || !/[0-9]/.test(passwordForm.newPassword)) {
+      setPasswordError('Use at least 8 characters, including one uppercase letter and one number.');
+      return;
+    }
+
+    setPasswordSaving(true);
+    try {
+      const response = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user?.id || user?._id,
+          currentPassword: passwordForm.currentPassword,
+          newPassword: passwordForm.newPassword,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Unable to change your password.');
+      setPasswordMessage(data.message || 'Password changed successfully.');
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (error) {
+      setPasswordError(error.message || 'Unable to change your password.');
+    } finally {
+      setPasswordSaving(false);
+    }
   };
 
   const menuItems = [
@@ -104,6 +146,19 @@ if (!isOpen) return null;
     //   bgColor: 'bg-orange-500/10',
     //   action: () => setActiveTab('meals'),
     // },
+    {
+      id: 'change-password',
+      label: 'Change Password',
+      icon: KeyRound,
+      color: 'text-emerald-400',
+      bgColor: 'bg-emerald-500/10',
+      action: () => {
+        setPasswordError('');
+        setPasswordMessage('');
+        setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+        setActiveTab('change-password');
+      },
+    },
     {
       id: 'privacy',
       label: 'Privacy',
@@ -153,6 +208,8 @@ if (!isOpen) return null;
                 ? 'Measurements'
                 : activeTab === 'nutrition'
                 ? 'Nutrition'
+                : activeTab === 'change-password'
+                ? 'Change Password'
                 : activeTab.toUpperCase()}
             </h2>
           </div>
@@ -213,6 +270,31 @@ if (!isOpen) return null;
                 <ChevronRight className="w-4 h-4 text-gray-600 group-hover:text-red-400 transition-colors" />
               </button>
             </div>
+          )}
+
+          {activeTab === 'change-password' && (
+            <form onSubmit={handleChangePassword} className="p-5 space-y-4">
+              <div>
+                <h3 className="text-sm font-bold text-white">Update your password</h3>
+                <p className="mt-1 text-xs leading-relaxed text-gray-400">Enter your current password, then choose a new password. Special characters are optional.</p>
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="current-password" className="text-xs font-semibold text-gray-300">Current password</label>
+                <input id="current-password" type="password" required autoComplete="current-password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm((prev) => ({ ...prev, currentPassword: event.target.value }))} className="w-full rounded-xl border border-gray-700 bg-[#1C2638] px-3 py-3 text-sm text-white outline-none focus:border-emerald-500" />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="new-account-password" className="text-xs font-semibold text-gray-300">New password</label>
+                <input id="new-account-password" type="password" required minLength={8} maxLength={128} autoComplete="new-password" value={passwordForm.newPassword} onChange={(event) => setPasswordForm((prev) => ({ ...prev, newPassword: event.target.value }))} className="w-full rounded-xl border border-gray-700 bg-[#1C2638] px-3 py-3 text-sm text-white outline-none focus:border-emerald-500" />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="confirm-account-password" className="text-xs font-semibold text-gray-300">Confirm new password</label>
+                <input id="confirm-account-password" type="password" required minLength={8} maxLength={128} autoComplete="new-password" value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm((prev) => ({ ...prev, confirmPassword: event.target.value }))} className="w-full rounded-xl border border-gray-700 bg-[#1C2638] px-3 py-3 text-sm text-white outline-none focus:border-emerald-500" />
+              </div>
+              <p className="text-[11px] text-gray-400">Password must contain at least 8 characters, one uppercase letter, and one number.</p>
+              {passwordError && <p className="rounded-lg border border-red-800/60 bg-red-950/30 p-3 text-xs text-red-300" role="alert">{passwordError}</p>}
+              {passwordMessage && <p className="rounded-lg border border-emerald-800/60 bg-emerald-950/30 p-3 text-xs text-emerald-300" role="status">{passwordMessage}</p>}
+              <button type="submit" disabled={passwordSaving} className="w-full rounded-xl bg-[#00A86B] py-3 text-sm font-bold text-white hover:bg-[#00945D] disabled:opacity-50">{passwordSaving ? 'Updating…' : 'Change Password'}</button>
+            </form>
           )}
 
           {activeTab === 'profile_edit' && (
