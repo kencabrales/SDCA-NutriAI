@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import dbConnect from '@/lib/mongodb';
 import User from '@/lib/User';
+import { comparePassword, hashPassword, isBcryptPasswordHash } from '@/lib/passwords';
 
 export async function POST(request) {
   try {
@@ -20,8 +21,15 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 400 });
     }
 
-    if (user.password !== password) {
+    if (!(await comparePassword(password, user.password))) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 400 });
+    }
+
+    // Upgrade existing plaintext accounts after a successful login without
+    // interrupting access for users registered before password hashing.
+    if (!isBcryptPasswordHash(user.password)) {
+      const upgradedHash = await hashPassword(password);
+      await User.updateOne({ _id: user._id, password: user.password }, { $set: { password: upgradedHash } });
     }
 
     return NextResponse.json({
