@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createHash, randomBytes } from 'node:crypto';
+import nodemailer from 'nodemailer';
 import dbConnect from '@/lib/mongodb';
 import User from '@/lib/User';
 
@@ -11,6 +12,33 @@ function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[char]));
+}
+
+function createGmailTransporter() {
+  const user = process.env.GMAIL_USER?.trim();
+  const appPassword = process.env.GMAIL_APP_PASSWORD?.replace(/\s/g, '');
+
+  if (!user || !appPassword) return null;
+
+  return nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    auth: { user, pass: appPassword },
+    connectionTimeout: 15_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
+  });
+}
+
 export async function POST(request) {
   try {
     const { email } = await request.json();
@@ -20,9 +48,8 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Enter a valid email address.' }, { status: 400 });
     }
 
-    // Return the same configuration response for every address, before looking
-    // up an account, so deployment setup does not disclose account existence.
-    if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM) {
+    const transporter = createGmailTransporter();
+    if (!transporter) {
       return NextResponse.json(
         { error: 'Password reset email is not configured yet. Please contact the administrator.' },
         { status: 503 }
@@ -43,12 +70,14 @@ export async function POST(request) {
     }
 
     const token = randomBytes(32).toString('hex');
+    const tokenHash = sha256(token);
     const expiresAt = new Date(now.getTime() + 30 * 60 * 1000);
+
     await User.updateOne(
       { _id: user._id },
       {
         $set: {
-          passwordResetTokenHash: sha256(token),
+          passwordResetTokenHash: tokenHash,
           passwordResetExpiresAt: expiresAt,
           passwordResetRequestedAt: now,
         },
@@ -57,33 +86,42 @@ export async function POST(request) {
 
     const appUrl = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin).replace(/\/+$/, '');
     const resetUrl = appUrl + '/reset-password?token=' + encodeURIComponent(token);
-    const safeName = String(user.firstName || 'there').replace(/[&<>"']/g, (char) => ({
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-    }[char]));
+    const safeName = escapeHtml(user.firstName || 'there');
 
-    const emailResponse = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer ' + process.env.RESEND_API_KEY,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: process.env.EMAIL_FROM,
-        to: [normalizedEmail],
+    try {
+      await transporter.sendMail({
+        from: { name: 'NutriAI', address: process.env.GMAIL_USER.trim() },
+        to: normalizedEmail,
         subject: 'Reset your NutriAI password',
+        text: [
+          `Hello ${user.firstName || 'there'},`,
+          '',
+          'We received a request to reset your NutriAI password.',
+          'This link expires in 30 minutes and can only be used once:',
+          resetUrl,
+          '',
+          'If you did not request this, you can ignore this email. Your password will not change.',
+        ].join('\n'),
         html: `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#172033;max-width:560px;margin:0 auto"><h2>Reset your NutriAI password</h2><p>Hello ${safeName},</p><p>We received a request to reset your NutriAI password. This link expires in 30 minutes and can only be used once.</p><p><a href="${resetUrl}" style="display:inline-block;background:#00A86B;color:white;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:bold">Reset password</a></p><p>If you did not request this, you can ignore this email. Your password will not change.</p></div>`,
-      }),
-    });
+      });
+    } catch (emailError) {
+      console.error('NutriAI Gmail password reset email failed:', {
+        code: emailError?.code || null,
+        responseCode: emailError?.responseCode || null,
+        command: emailError?.command || null,
+        message: String(emailError?.message || 'Unknown SMTP error').slice(0, 500),
+      });
 
-    if (!emailResponse.ok) {
-      const providerDetails = await emailResponse.text().catch(() => '');
-      console.error('NutriAI password reset email failed:', emailResponse.status, providerDetails.slice(0, 500));
       await User.updateOne(
-        { _id: user._id, passwordResetTokenHash: sha256(token) },
-        { $unset: { passwordResetTokenHash: 1, passwordResetExpiresAt: 1 } }
+        { _id: user._id, passwordResetTokenHash: tokenHash },
+        {
+          $unset: {
+            passwordResetTokenHash: 1,
+            passwordResetExpiresAt: 1,
+            passwordResetRequestedAt: 1,
+          },
+        }
       );
-      // Keep the response generic so the endpoint does not reveal whether an
-      // account exists when the email provider has an outage.
     }
 
     return NextResponse.json({ message: GENERIC_MESSAGE });
